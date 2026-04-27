@@ -71,4 +71,6 @@ When working on Prism, invoke these for task-specific guidance:
 - `keyring` crate's keyutils backend was unreliable on Linux (save succeeded, read returned `NoEntry`). Replaced with file-based storage. Migrate to `tauri-plugin-stronghold` if encryption-at-rest becomes a requirement.
 - WebKitGTK on Wayland needs `WEBKIT_DISABLE_DMABUF_RENDERER=1` (baked into the `tauri:dev` script). Linux-only; if Windows/macOS contributors arrive, switch to `cross-env`.
 - Sidebar uses two persistence layers: SQLite for content (`watched_repos`, `tracked_orgs`) and `localStorage` for UI state (`prism.sidebar-collapsed`, `prism.collapsed-orgs`).
+- **GraphQL is the default for GitHub features.** Use `Client::graphql<T>` in `src-tauri/src/github.rs` and write one query with aliases instead of multiple REST calls. The earlier REST-Search-based dashboard was inconsistent (silent zero counts); the GraphQL rewrite fixed it. Mutations (merge, add comment, submit review) use the same helper.
+- **GitHub Search API has a real-time gotcha.** New PRs/issues take 1–5 min to appear in `search(type: ISSUE)` results — affects GitHub.com itself. The dashboard's "Aguardando review" / open count panels can lag right after PR creation. Not a Prism bug. `viewer.pullRequests` is the real-time alternative for the user's own PRs.
 - License: MIT.
