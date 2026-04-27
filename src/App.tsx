@@ -1,5 +1,10 @@
-import { GitPullRequest, Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import {
+  GitPullRequest,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { LoginForm } from '@/components/login-form'
 import { RepoList } from '@/components/repo-list'
@@ -34,13 +39,25 @@ function App() {
       .catch((err) => setState({ kind: 'error', message: String(err) }))
   }, [])
 
-  function toggleCollapsed() {
+  const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev
       localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0')
       return next
     })
-  }
+  }, [])
+
+  useEffect(() => {
+    if (state.kind !== 'authenticated') return
+    function onKeydown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        toggleCollapsed()
+      }
+    }
+    window.addEventListener('keydown', onKeydown)
+    return () => window.removeEventListener('keydown', onKeydown)
+  }, [state.kind, toggleCollapsed])
 
   async function handleLogout() {
     try {
@@ -89,20 +106,34 @@ function App() {
         style={{ width: collapsed ? 56 : 288 }}
         className="flex h-full flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-out"
       >
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          className="flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4 transition-colors hover:bg-sidebar-accent/40"
-          aria-label={collapsed ? 'Expandir sidebar' : 'Minimizar sidebar'}
-          title={collapsed ? 'Expandir' : 'Minimizar'}
-        >
-          <GitPullRequest className="size-5 shrink-0 text-primary" />
-          {!collapsed && (
-            <span className="text-base font-semibold tracking-tight whitespace-nowrap">
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="group relative flex h-14 shrink-0 items-center justify-center border-b border-sidebar-border transition-colors hover:bg-sidebar-accent/40"
+            aria-label="Expandir sidebar"
+            title="Expandir (Ctrl+B)"
+          >
+            <GitPullRequest className="size-5 text-primary transition-opacity group-hover:opacity-0" />
+            <PanelLeftOpen className="absolute size-5 text-sidebar-foreground/60 opacity-0 transition-opacity group-hover:opacity-100" />
+          </button>
+        ) : (
+          <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-3">
+            <GitPullRequest className="size-5 shrink-0 text-primary" />
+            <span className="flex-1 text-base font-semibold tracking-tight">
               Prism
             </span>
-          )}
-        </button>
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              className="rounded-md p-1.5 text-sidebar-foreground/40 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              aria-label="Minimizar sidebar"
+              title="Minimizar (Ctrl+B)"
+            >
+              <PanelLeftClose className="size-4" />
+            </button>
+          </div>
+        )}
 
         <RepoList collapsed={collapsed} settingsSlot={<SettingsDialog />} />
         <UserMenu user={user} onLogout={handleLogout} collapsed={collapsed} />
