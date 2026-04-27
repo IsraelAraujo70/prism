@@ -18,14 +18,14 @@ Prism é um app desktop leve e multiplataforma (Windows / macOS / Linux), constr
 
 Veja o [PRD completo](docs/PRD.md) para escopo, jornadas e requisitos.
 
-- **MVP (v0.1)** — Auth via PAT, lista/detalhe de PRs (read-only), status de checks, notificações básicas.
+- **MVP (v0.1)** — Auth via OAuth Device Flow, lista/detalhe de PRs (read-only), status de checks, notificações básicas.
 - **v0.2** — Submeter reviews, múltiplas contas, deep links, quick switcher.
-- **v1.0** — OAuth completo, merge no app, configuração granular de notificações.
+- **v1.0** — Merge no app, configuração granular de notificações.
 
 ## Stack
 
 - **Backend:** Rust + Tauri
-- **Frontend:** a definir (React / Solid / Svelte)
+- **Frontend:** React 19 + TypeScript + Tailwind CSS v4
 - **API:** GitHub GraphQL
 - **Cache:** SQLite
 
