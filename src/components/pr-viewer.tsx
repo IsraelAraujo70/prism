@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
+import { Markdown } from '@/components/markdown'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -207,9 +208,7 @@ function PrBody({ data }: { data: PrDetails }) {
           <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             Descrição
           </h2>
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-            {data.body}
-          </p>
+          <Markdown>{data.body}</Markdown>
         </section>
       )}
 
@@ -486,11 +485,11 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
           </span>
         </header>
         <div className="px-4 py-3">
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-            {entry.body || (
-              <span className="italic text-muted-foreground">(sem texto)</span>
-            )}
-          </p>
+          {entry.body.trim().length > 0 ? (
+            <Markdown>{entry.body}</Markdown>
+          ) : (
+            <p className="text-sm italic text-muted-foreground">(sem texto)</p>
+          )}
         </div>
       </li>
     )
@@ -559,9 +558,7 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
       </header>
       {entry.body.trim().length > 0 && (
         <div className="px-4 py-3">
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-            {entry.body}
-          </p>
+          <Markdown>{entry.body}</Markdown>
         </div>
       )}
     </li>
