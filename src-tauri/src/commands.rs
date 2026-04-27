@@ -2,7 +2,7 @@ use crate::auth;
 use crate::db::{self, DbState, WatchedRepo};
 use crate::error::{AppError, AppResult};
 use crate::github::{
-    self, Client, DeviceCodeResponse, DevicePollResult, GithubUser, PollOutcome, Repo,
+    self, Client, DeviceCodeResponse, DevicePollResult, GithubUser, OrgRef, PollOutcome, Repo,
 };
 use serde::Serialize;
 use tauri::State;
@@ -85,6 +85,22 @@ pub async fn remove_watched_repo(repo_id: i64, db: State<'_, DbState>) -> AppRes
 pub async fn get_watched_ids(db: State<'_, DbState>) -> AppResult<Vec<i64>> {
     let conn = db.0.lock().unwrap();
     Ok(db::watched_ids(&conn))
+}
+
+#[tauri::command]
+pub fn get_oauth_client_id() -> &'static str {
+    github::GITHUB_CLIENT_ID
+}
+
+#[tauri::command]
+pub fn open_url(url: String) {
+    open::that(url).ok();
+}
+
+#[tauri::command]
+pub async fn get_user_orgs() -> AppResult<Vec<OrgRef>> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    Client::new(token)?.list_user_orgs().await
 }
 
 // ── Tracked orgs (SQLite + GitHub) ─────────────────────

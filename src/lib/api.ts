@@ -35,6 +35,12 @@ export type WatchedRepo = {
   owner_avatar_url: string
 }
 
+export type OrgRef = {
+  login: string
+  avatar_url: string
+  description: string | null
+}
+
 export type AuthStatus = {
   authenticated: boolean
   user: GithubUser | null
@@ -69,6 +75,10 @@ export const api = {
   removeWatchedRepo: (repoId: number) =>
     invoke<void>('remove_watched_repo', { repoId }),
   getWatchedIds: () => invoke<number[]>('get_watched_ids'),
+
+  getUserOrgs: () => invoke<OrgRef[]>('get_user_orgs'),
+  getOauthClientId: () => invoke<string>('get_oauth_client_id'),
+  openUrl: (url: string) => invoke<void>('open_url', { url }),
 
   getTrackedOrgs: () => invoke<string[]>('get_tracked_orgs'),
   addTrackedOrg: (name: string) => invoke<void>('add_tracked_org', { name }),

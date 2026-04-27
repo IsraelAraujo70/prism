@@ -39,6 +39,13 @@ pub struct RepoOwner {
     pub avatar_url: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgRef {
+    pub login: String,
+    pub avatar_url: String,
+    pub description: Option<String>,
+}
+
 // ── Device Flow types ──────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,6 +191,15 @@ impl Client {
             .send()
             .await?;
         Ok(res.status().is_success())
+    }
+
+    pub async fn list_user_orgs(&self) -> AppResult<Vec<OrgRef>> {
+        let res = self
+            .request(reqwest::Method::GET, "/user/orgs")
+            .query(&[("per_page", "100")])
+            .send()
+            .await?;
+        Ok(res.error_for_status()?.json().await?)
     }
 
     pub async fn list_org_repos(&self, org: &str) -> AppResult<Vec<Repo>> {
