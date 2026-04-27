@@ -1,29 +1,59 @@
 use crate::error::AppResult;
-use keyring::Entry;
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
 
-const SERVICE: &str = "io.github.israelaraujo70.prism";
-const ACCOUNT: &str = "github_pat";
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
-fn entry() -> AppResult<Entry> {
-    Ok(Entry::new(SERVICE, ACCOUNT)?)
+fn data_dir() -> PathBuf {
+    let base = std::env::var("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            PathBuf::from(home).join(".local").join("share")
+        });
+    base.join("prism")
+}
+
+fn token_path() -> PathBuf {
+    let dir = data_dir();
+    fs::create_dir_all(&dir).ok();
+    dir.join(".credentials")
 }
 
 pub fn load_token() -> AppResult<Option<String>> {
-    match entry()?.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(keyring::Error::NoEntry) => Ok(None),
+    let path = token_path();
+    match fs::read_to_string(&path) {
+        Ok(contents) => {
+            let token = contents.trim().to_string();
+            if token.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(token))
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.into()),
     }
 }
 
 pub fn save_token(token: &str) -> AppResult<()> {
-    entry()?.set_password(token)?;
+    let path = token_path();
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    opts.mode(0o600);
+    let mut file = opts.open(&path)?;
+    file.write_all(token.as_bytes())?;
     Ok(())
 }
 
 pub fn delete_token() -> AppResult<()> {
-    match entry()?.delete_credential() {
-        Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),
+    let path = token_path();
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.into()),
     }
 }

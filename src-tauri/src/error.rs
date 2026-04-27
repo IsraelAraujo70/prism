@@ -7,8 +7,8 @@ pub enum AppError {
     NotAuthenticated,
     #[error("invalid token: {0}")]
     InvalidToken(String),
-    #[error("keyring: {0}")]
-    Keyring(#[from] keyring::Error),
+    #[error("storage: {0}")]
+    Storage(#[from] std::io::Error),
     #[error("network: {0}")]
     Network(#[from] reqwest::Error),
 }
