@@ -119,6 +119,19 @@ export type TimelineEntry =
       submitted_at: string
     }
 
+export type CheckEntry = {
+  name: string
+  status: string
+  conclusion: string | null
+  url: string | null
+  started_at: string | null
+  completed_at: string | null
+  app_name: string | null
+  app_logo_url: string | null
+  workflow_name: string | null
+  description: string | null
+}
+
 export type PrDetails = {
   id: number
   number: number
@@ -145,6 +158,7 @@ export type PrDetails = {
   review_requests: PrAuthor[]
   timeline: TimelineEntry[]
   checks_state: string | null
+  checks: CheckEntry[]
 }
 
 export const api = {

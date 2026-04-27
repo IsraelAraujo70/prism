@@ -22,6 +22,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   api,
+  type CheckEntry,
   type PrAuthor,
   type PrDetails,
   type PullRequestRef,
@@ -201,7 +202,9 @@ function PrBody({ data }: { data: PrDetails }) {
         </section>
       )}
 
-      {data.checks_state && <ChecksBanner state={data.checks_state} />}
+      {(data.checks.length > 0 || data.checks_state) && (
+        <ChecksSection checks={data.checks} rollupState={data.checks_state} />
+      )}
 
       {data.body.trim().length > 0 && (
         <section className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
@@ -407,52 +410,213 @@ function LabelChip({ name, color }: { name: string; color: string }) {
   )
 }
 
-function ChecksBanner({ state }: { state: string }) {
-  const config: Record<
-    string,
-    { label: string; icon: LucideIcon; className: string }
-  > = {
-    SUCCESS: {
-      label: 'Todos os checks passaram',
-      icon: Check,
-      className: 'bg-emerald-500/10 text-emerald-400',
-    },
-    FAILURE: {
-      label: 'Checks falharam',
-      icon: MessageCircleX,
-      className: 'bg-destructive/10 text-destructive',
-    },
-    ERROR: {
-      label: 'Checks com erro',
-      icon: MessageCircleX,
-      className: 'bg-destructive/10 text-destructive',
-    },
-    PENDING: {
-      label: 'Checks em andamento',
-      icon: Loader2,
-      className: 'bg-muted text-muted-foreground',
-    },
-    EXPECTED: {
-      label: 'Checks aguardando',
-      icon: CircleDashed,
-      className: 'bg-muted text-muted-foreground',
-    },
-  }
-  const cfg = config[state] ?? {
-    label: state,
-    icon: CircleDashed,
-    className: 'bg-muted text-muted-foreground',
-  }
+function ChecksSection({
+  checks,
+  rollupState,
+}: {
+  checks: CheckEntry[]
+  rollupState: string | null
+}) {
+  const summary = countByConclusion(checks)
   return (
-    <div
-      className={`inline-flex w-fit items-center gap-2 rounded-lg px-3 py-2 text-xs ${cfg.className}`}
-    >
-      <cfg.icon
-        className={`size-4 ${state === 'PENDING' ? 'animate-spin' : ''}`}
-      />
-      {cfg.label}
-    </div>
+    <section className="rounded-xl bg-card ring-1 ring-foreground/10">
+      <header className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <h2 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Checks
+          {checks.length > 0 && (
+            <span className="tabular-nums text-muted-foreground/60">
+              {checks.length}
+            </span>
+          )}
+        </h2>
+        <RollupBadge state={rollupState} summary={summary} />
+      </header>
+      {checks.length === 0 ? (
+        <p className="px-4 py-3 text-xs text-muted-foreground">
+          Sem detalhes de checks individuais.
+        </p>
+      ) : (
+        <ul className="flex flex-col">
+          {checks.map((c, i) => (
+            <CheckItem key={`${c.name}-${i}`} check={c} />
+          ))}
+        </ul>
+      )}
+    </section>
   )
+}
+
+type CheckTone = 'success' | 'failure' | 'pending' | 'neutral'
+
+function checkTone(c: CheckEntry): CheckTone {
+  if (c.status !== 'COMPLETED') return 'pending'
+  switch (c.conclusion) {
+    case 'SUCCESS':
+      return 'success'
+    case 'FAILURE':
+    case 'ERROR':
+    case 'TIMED_OUT':
+    case 'CANCELLED':
+    case 'ACTION_REQUIRED':
+    case 'STARTUP_FAILURE':
+      return 'failure'
+    default:
+      return 'neutral'
+  }
+}
+
+function countByConclusion(checks: CheckEntry[]) {
+  let success = 0
+  let failure = 0
+  let pending = 0
+  let neutral = 0
+  for (const c of checks) {
+    const tone = checkTone(c)
+    if (tone === 'success') success++
+    else if (tone === 'failure') failure++
+    else if (tone === 'pending') pending++
+    else neutral++
+  }
+  return { success, failure, pending, neutral }
+}
+
+function RollupBadge({
+  state,
+  summary,
+}: {
+  state: string | null
+  summary: { success: number; failure: number; pending: number; neutral: number }
+}) {
+  const total =
+    summary.success + summary.failure + summary.pending + summary.neutral
+  if (total === 0 && !state) return null
+
+  if (summary.failure > 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-rose-400">
+        <MessageCircleX className="size-3.5" />
+        {summary.failure} falhando
+      </span>
+    )
+  }
+  if (summary.pending > 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        {summary.pending} rodando
+      </span>
+    )
+  }
+  if (summary.success > 0 && summary.success === total) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
+        <Check className="size-3.5" />
+        Todos passando
+      </span>
+    )
+  }
+  if (state === 'SUCCESS') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
+        <Check className="size-3.5" />
+        Sucesso
+      </span>
+    )
+  }
+  if (state === 'FAILURE' || state === 'ERROR') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-rose-400">
+        <MessageCircleX className="size-3.5" />
+        Falha
+      </span>
+    )
+  }
+  if (state === 'PENDING' || state === 'EXPECTED') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        Aguardando
+      </span>
+    )
+  }
+  return null
+}
+
+function CheckItem({ check }: { check: CheckEntry }) {
+  const tone = checkTone(check)
+  const toneIcon: Record<CheckTone, LucideIcon> = {
+    success: Check,
+    failure: MessageCircleX,
+    pending: Loader2,
+    neutral: CircleDashed,
+  }
+  const toneColor: Record<CheckTone, string> = {
+    success: 'text-emerald-400',
+    failure: 'text-rose-400',
+    pending: 'text-muted-foreground',
+    neutral: 'text-muted-foreground/70',
+  }
+  const Icon = toneIcon[tone]
+
+  const duration = formatDuration(check.started_at, check.completed_at)
+  const subtitle = [check.app_name, check.workflow_name, duration]
+    .filter(Boolean)
+    .join(' · ')
+
+  const clickable = Boolean(check.url)
+  const Wrapper: 'button' | 'div' = clickable ? 'button' : 'div'
+
+  return (
+    <li className="border-t border-border first:border-t-0">
+      <Wrapper
+        type={clickable ? 'button' : undefined}
+        onClick={
+          clickable && check.url
+            ? () => api.openUrl(check.url as string)
+            : undefined
+        }
+        className={`group flex w-full items-center gap-3 px-4 py-2.5 text-left ${
+          clickable ? 'transition-colors hover:bg-accent' : ''
+        }`}
+      >
+        <Icon
+          className={`size-4 shrink-0 ${toneColor[tone]} ${
+            tone === 'pending' ? 'animate-spin' : ''
+          }`}
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm text-foreground/90">
+            {check.name}
+          </span>
+          {subtitle && (
+            <span className="truncate text-[11px] text-muted-foreground">
+              {subtitle}
+            </span>
+          )}
+        </div>
+        {clickable && (
+          <ExternalLink className="size-3.5 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
+        )}
+      </Wrapper>
+    </li>
+  )
+}
+
+function formatDuration(
+  started: string | null,
+  completed: string | null,
+): string | null {
+  if (!started || !completed) return null
+  const a = new Date(started).getTime()
+  const b = new Date(completed).getTime()
+  if (Number.isNaN(a) || Number.isNaN(b) || b <= a) return null
+  const sec = Math.round((b - a) / 1000)
+  if (sec < 60) return `${sec}s`
+  const min = Math.floor(sec / 60)
+  const rem = sec % 60
+  if (min < 60) return rem ? `${min}m ${rem}s` : `${min}m`
+  const hr = Math.floor(min / 60)
+  return `${hr}h ${min % 60}m`
 }
 
 function TimelineItem({ entry }: { entry: TimelineEntry }) {

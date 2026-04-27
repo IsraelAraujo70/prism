@@ -414,6 +414,20 @@ pub enum TimelineEntry {
     },
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct CheckEntry {
+    pub name: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub url: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub app_name: Option<String>,
+    pub app_logo_url: Option<String>,
+    pub workflow_name: Option<String>,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PrDetails {
     pub id: i64,
@@ -441,6 +455,7 @@ pub struct PrDetails {
     pub review_requests: Vec<PrAuthor>,
     pub timeline: Vec<TimelineEntry>,
     pub checks_state: Option<String>,
+    pub checks: Vec<CheckEntry>,
 }
 
 const PR_DETAILS_QUERY: &str = r#"
@@ -494,7 +509,34 @@ query($owner: String!, $name: String!, $number: Int!) {
       lastCommit: commits(last: 1) {
         nodes {
           commit {
-            statusCheckRollup { state }
+            oid
+            statusCheckRollup {
+              state
+              contexts(first: 100) {
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    name
+                    status
+                    conclusion
+                    detailsUrl
+                    startedAt
+                    completedAt
+                    checkSuite {
+                      app { name logoUrl }
+                      workflowRun { workflow { name } }
+                    }
+                  }
+                  ... on StatusContext {
+                    context
+                    state
+                    targetUrl
+                    description
+                    avatarUrl
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -647,6 +689,63 @@ struct GqlCommit {
 #[derive(Deserialize)]
 struct GqlRollup {
     state: String,
+    contexts: GqlContextConnection,
+}
+
+#[derive(Deserialize)]
+struct GqlContextConnection {
+    nodes: Vec<GqlCheckContext>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "__typename")]
+enum GqlCheckContext {
+    CheckRun {
+        name: String,
+        status: String,
+        conclusion: Option<String>,
+        #[serde(rename = "detailsUrl")]
+        details_url: Option<String>,
+        #[serde(rename = "startedAt")]
+        started_at: Option<String>,
+        #[serde(rename = "completedAt")]
+        completed_at: Option<String>,
+        #[serde(rename = "checkSuite")]
+        check_suite: Option<GqlCheckSuite>,
+    },
+    StatusContext {
+        context: String,
+        state: String,
+        #[serde(rename = "targetUrl")]
+        target_url: Option<String>,
+        description: Option<String>,
+    },
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GqlCheckSuite {
+    app: Option<GqlApp>,
+    #[serde(rename = "workflowRun")]
+    workflow_run: Option<GqlWorkflowRun>,
+}
+
+#[derive(Deserialize)]
+struct GqlApp {
+    name: String,
+    #[serde(rename = "logoUrl")]
+    logo_url: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GqlWorkflowRun {
+    workflow: Option<GqlWorkflow>,
+}
+
+#[derive(Deserialize)]
+struct GqlWorkflow {
+    name: String,
 }
 
 fn user_to_author(u: GqlUser) -> PrAuthor {
@@ -718,13 +817,71 @@ pub async fn get_pr_details(
     }
     timeline.sort_by(|a, b| timeline_at(a).cmp(timeline_at(b)));
 
-    let checks_state = pr
+    let rollup = pr
         .last_commit
         .nodes
         .into_iter()
         .next()
-        .and_then(|n| n.commit.status_check_rollup)
-        .map(|r| r.state);
+        .and_then(|n| n.commit.status_check_rollup);
+
+    let (checks_state, checks) = match rollup {
+        None => (None, Vec::new()),
+        Some(r) => {
+            let entries = r
+                .contexts
+                .nodes
+                .into_iter()
+                .map(|c| match c {
+                    GqlCheckContext::CheckRun {
+                        name,
+                        status,
+                        conclusion,
+                        details_url,
+                        started_at,
+                        completed_at,
+                        check_suite,
+                    } => {
+                        let suite = check_suite.unwrap_or_default();
+                        let app = suite.app;
+                        let workflow_name = suite
+                            .workflow_run
+                            .and_then(|w| w.workflow)
+                            .map(|w| w.name);
+                        CheckEntry {
+                            name,
+                            status,
+                            conclusion,
+                            url: details_url,
+                            started_at,
+                            completed_at,
+                            app_name: app.as_ref().map(|a| a.name.clone()),
+                            app_logo_url: app.and_then(|a| a.logo_url),
+                            workflow_name,
+                            description: None,
+                        }
+                    }
+                    GqlCheckContext::StatusContext {
+                        context,
+                        state,
+                        target_url,
+                        description,
+                    } => CheckEntry {
+                        name: context,
+                        status: "COMPLETED".into(),
+                        conclusion: Some(state),
+                        url: target_url,
+                        started_at: None,
+                        completed_at: None,
+                        app_name: None,
+                        app_logo_url: None,
+                        workflow_name: None,
+                        description,
+                    },
+                })
+                .collect();
+            (Some(r.state), entries)
+        }
+    };
 
     Ok(PrDetails {
         id: pr.database_id.unwrap_or(0),
@@ -752,6 +909,7 @@ pub async fn get_pr_details(
         review_requests,
         timeline,
         checks_state,
+        checks,
     })
 }
 
