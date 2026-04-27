@@ -1,5 +1,11 @@
 import { ChevronRight, GitFork, Lock, RefreshCw, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 
 import { AddRepoDialog } from '@/components/add-repo-dialog'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -33,9 +39,16 @@ function saveCollapsed(set: Set<string>) {
   localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set]))
 }
 
-export function RepoList() {
+type Props = {
+  collapsed?: boolean
+  settingsSlot?: ReactNode
+}
+
+export function RepoList({ collapsed = false, settingsSlot }: Props) {
   const [state, setState] = useState<State>({ status: 'loading' })
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed())
+  const [collapsedOrgs, setCollapsedOrgs] = useState<Set<string>>(() =>
+    loadCollapsed(),
+  )
 
   const load = useCallback(async () => {
     setState({ status: 'loading' })
@@ -75,13 +88,10 @@ export function RepoList() {
   }, [state])
 
   function toggleGroup(owner: string) {
-    setCollapsed((prev) => {
+    setCollapsedOrgs((prev) => {
       const next = new Set(prev)
-      if (next.has(owner)) {
-        next.delete(owner)
-      } else {
-        next.add(owner)
-      }
+      if (next.has(owner)) next.delete(owner)
+      else next.add(owner)
       saveCollapsed(next)
       return next
     })
@@ -90,6 +100,32 @@ export function RepoList() {
   async function removeRepo(id: number) {
     await api.removeWatchedRepo(id)
     load()
+  }
+
+  if (collapsed) {
+    return (
+      <nav className="flex flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden py-3">
+        <AddRepoDialog watchedIds={watchedIds} onChanged={load} compact />
+        {settingsSlot && <div className="mb-1">{settingsSlot}</div>}
+        <div className="my-1 h-px w-6 bg-sidebar-border" />
+        {state.status === 'ready' &&
+          groups.map((group) => (
+            <button
+              key={group.owner}
+              type="button"
+              title={`${group.owner} (${group.repos.length})`}
+              className="rounded-md p-1 transition-colors hover:bg-sidebar-accent"
+            >
+              <Avatar className="size-7 rounded-md">
+                <AvatarImage src={group.avatar} alt={group.owner} />
+                <AvatarFallback className="rounded-md bg-sidebar-accent text-[10px] font-semibold">
+                  {group.owner.slice(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+            </button>
+          ))}
+      </nav>
+    )
   }
 
   return (
@@ -104,6 +140,7 @@ export function RepoList() {
           )}
         </span>
         <div className="flex items-center gap-0.5">
+          {settingsSlot}
           <button
             type="button"
             onClick={load}
@@ -155,7 +192,7 @@ export function RepoList() {
               <OrgGroup
                 key={group.owner}
                 group={group}
-                collapsed={collapsed.has(group.owner)}
+                collapsed={collapsedOrgs.has(group.owner)}
                 onToggle={() => toggleGroup(group.owner)}
                 onRemove={removeRepo}
               />

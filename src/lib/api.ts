@@ -70,5 +70,10 @@ export const api = {
     invoke<void>('remove_watched_repo', { repoId }),
   getWatchedIds: () => invoke<number[]>('get_watched_ids'),
 
+  getTrackedOrgs: () => invoke<string[]>('get_tracked_orgs'),
+  addTrackedOrg: (name: string) => invoke<void>('add_tracked_org', { name }),
+  removeTrackedOrg: (name: string) =>
+    invoke<void>('remove_tracked_org', { name }),
+
   listAllRepos: () => invoke<Repo[]>('list_all_repos'),
 }

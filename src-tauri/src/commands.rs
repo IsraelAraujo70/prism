@@ -87,10 +87,60 @@ pub async fn get_watched_ids(db: State<'_, DbState>) -> AppResult<Vec<i64>> {
     Ok(db::watched_ids(&conn))
 }
 
+// ── Tracked orgs (SQLite + GitHub) ─────────────────────
+
+#[tauri::command]
+pub async fn get_tracked_orgs(db: State<'_, DbState>) -> AppResult<Vec<String>> {
+    let conn = db.0.lock().unwrap();
+    Ok(db::list_tracked_orgs(&conn))
+}
+
+#[tauri::command]
+pub async fn add_tracked_org(name: String, db: State<'_, DbState>) -> AppResult<()> {
+    let trimmed = name.trim().trim_start_matches('@').to_string();
+    if trimmed.is_empty() {
+        return Err(AppError::InvalidToken("nome da organização vazio".into()));
+    }
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    if !client.org_exists(&trimmed).await? {
+        return Err(AppError::InvalidToken(format!(
+            "organização '{trimmed}' não encontrada"
+        )));
+    }
+    let conn = db.0.lock().unwrap();
+    db::add_tracked_org(&conn, &trimmed);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_tracked_org(name: String, db: State<'_, DbState>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    db::remove_tracked_org(&conn, &name);
+    Ok(())
+}
+
 // ── GitHub API ─────────────────────────────────────────
 
 #[tauri::command]
-pub async fn list_all_repos() -> AppResult<Vec<Repo>> {
+pub async fn list_all_repos(db: State<'_, DbState>) -> AppResult<Vec<Repo>> {
     let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
-    Client::new(token)?.list_repos().await
+    let client = Client::new(token)?;
+
+    let mut repos = client.list_repos().await?;
+
+    let orgs = {
+        let conn = db.0.lock().unwrap();
+        db::list_tracked_orgs(&conn)
+    };
+
+    for org in orgs {
+        if let Ok(extra) = client.list_org_repos(&org).await {
+            repos.extend(extra);
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    repos.retain(|r| seen.insert(r.id));
+    Ok(repos)
 }

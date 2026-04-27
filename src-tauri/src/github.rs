@@ -177,4 +177,24 @@ impl Client {
             .await?;
         Ok(res.error_for_status()?.json().await?)
     }
+
+    pub async fn org_exists(&self, org: &str) -> AppResult<bool> {
+        let res = self
+            .request(reqwest::Method::GET, &format!("/orgs/{org}"))
+            .send()
+            .await?;
+        Ok(res.status().is_success())
+    }
+
+    pub async fn list_org_repos(&self, org: &str) -> AppResult<Vec<Repo>> {
+        let res = self
+            .request(reqwest::Method::GET, &format!("/orgs/{org}/repos"))
+            .query(&[("per_page", "100"), ("sort", "updated"), ("type", "all")])
+            .send()
+            .await?;
+        if res.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(Vec::new());
+        }
+        Ok(res.error_for_status()?.json().await?)
+    }
 }

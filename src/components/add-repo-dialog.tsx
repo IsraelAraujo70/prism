@@ -17,6 +17,7 @@ import { api, type Repo, type WatchedRepo } from '@/lib/api'
 type Props = {
   watchedIds: Set<number>
   onChanged: () => void
+  compact?: boolean
 }
 
 type FetchState =
@@ -25,7 +26,7 @@ type FetchState =
   | { status: 'ready'; repos: Repo[] }
   | { status: 'error'; message: string }
 
-export function AddRepoDialog({ watchedIds, onChanged }: Props) {
+export function AddRepoDialog({ watchedIds, onChanged, compact = false }: Props) {
   const [open, setOpen] = useState(false)
   const [state, setState] = useState<FetchState>({ status: 'idle' })
   const [filter, setFilter] = useState('')
@@ -95,10 +96,14 @@ export function AddRepoDialog({ watchedIds, onChanged }: Props) {
       <DialogTrigger asChild>
         <button
           type="button"
-          className="rounded-md p-1 text-sidebar-foreground/40 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className={
+            compact
+              ? 'flex size-7 items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground'
+              : 'rounded-md p-1 text-sidebar-foreground/40 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground'
+          }
           aria-label="Adicionar repositório"
         >
-          <Plus className="size-4" />
+          <Plus className={compact ? 'size-4' : 'size-4'} />
         </button>
       </DialogTrigger>
 

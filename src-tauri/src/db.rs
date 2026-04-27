@@ -43,9 +43,13 @@ pub fn init() -> Connection {
             owner_login TEXT NOT NULL,
             owner_avatar_url TEXT NOT NULL,
             added_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+         CREATE TABLE IF NOT EXISTS tracked_orgs (
+            name      TEXT PRIMARY KEY,
+            added_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );",
     )
-    .expect("failed to create watched_repos table");
+    .expect("failed to create database tables");
     conn
 }
 
@@ -103,4 +107,27 @@ pub fn watched_ids(conn: &Connection) -> Vec<i64> {
         .unwrap()
         .filter_map(|r| r.ok())
         .collect()
+}
+
+pub fn list_tracked_orgs(conn: &Connection) -> Vec<String> {
+    let mut stmt = conn
+        .prepare("SELECT name FROM tracked_orgs ORDER BY name COLLATE NOCASE")
+        .unwrap();
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+}
+
+pub fn add_tracked_org(conn: &Connection, name: &str) {
+    conn.execute(
+        "INSERT OR IGNORE INTO tracked_orgs (name) VALUES (?1)",
+        params![name],
+    )
+    .unwrap();
+}
+
+pub fn remove_tracked_org(conn: &Connection, name: &str) {
+    conn.execute("DELETE FROM tracked_orgs WHERE name = ?1", params![name])
+        .unwrap();
 }

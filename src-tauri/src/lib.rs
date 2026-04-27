@@ -31,6 +31,9 @@ pub fn run() {
       commands::add_watched_repo,
       commands::remove_watched_repo,
       commands::get_watched_ids,
+      commands::get_tracked_orgs,
+      commands::add_tracked_org,
+      commands::remove_tracked_org,
       commands::list_all_repos,
     ])
     .run(tauri::generate_context!())
