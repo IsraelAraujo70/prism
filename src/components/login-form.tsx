@@ -1,95 +1,178 @@
-import { ExternalLink, GitPullRequest, Loader2 } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { Check, Copy, GitPullRequest, Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { api, type AuthStatus } from '@/lib/api'
-
-const PAT_URL =
-  'https://github.com/settings/tokens/new?scopes=repo,read:org&description=Prism'
+import { api, type AuthStatus, type DeviceCodeResponse } from '@/lib/api'
 
 type Props = {
   onAuthenticated: (status: AuthStatus) => void
 }
 
-export function LoginForm({ onAuthenticated }: Props) {
-  const [token, setToken] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+type FlowState =
+  | { step: 'idle' }
+  | { step: 'starting' }
+  | { step: 'waiting'; code: DeviceCodeResponse }
+  | { step: 'error'; message: string }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!token.trim() || submitting) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      const status = await api.saveToken(token)
-      onAuthenticated(status)
-    } catch (err) {
-      setError(String(err))
-      setSubmitting(false)
+export function LoginForm({ onAuthenticated }: Props) {
+  const [state, setState] = useState<FlowState>({ step: 'idle' })
+  const [copied, setCopied] = useState(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const intervalRef = useRef(5)
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
     }
+  }, [])
+
+  useEffect(() => () => stopPolling(), [stopPolling])
+
+  async function startFlow() {
+    setState({ step: 'starting' })
+    try {
+      const code = await api.startDeviceFlow()
+      intervalRef.current = code.interval
+      setState({ step: 'waiting', code })
+      startPolling(code.device_code)
+    } catch (err) {
+      setState({ step: 'error', message: String(err) })
+    }
+  }
+
+  function startPolling(deviceCode: string) {
+    stopPolling()
+    pollRef.current = setInterval(async () => {
+      try {
+        const result = await api.pollDeviceFlow(deviceCode)
+        switch (result.status) {
+          case 'success':
+            stopPolling()
+            onAuthenticated({ authenticated: true, user: result.user })
+            break
+          case 'slow_down':
+            intervalRef.current = result.interval
+            stopPolling()
+            pollRef.current = setInterval(
+              () => pollOnce(deviceCode),
+              intervalRef.current * 1000,
+            )
+            break
+          case 'expired':
+            stopPolling()
+            setState({ step: 'error', message: 'Código expirou. Tente novamente.' })
+            break
+          case 'denied':
+            stopPolling()
+            setState({ step: 'error', message: 'Autorização negada.' })
+            break
+          case 'pending':
+            break
+        }
+      } catch (err) {
+        stopPolling()
+        setState({ step: 'error', message: String(err) })
+      }
+    }, intervalRef.current * 1000)
+  }
+
+  async function pollOnce(deviceCode: string) {
+    try {
+      const result = await api.pollDeviceFlow(deviceCode)
+      if (result.status === 'success') {
+        stopPolling()
+        onAuthenticated({ authenticated: true, user: result.user })
+      }
+    } catch {
+      // ignore single poll failure
+    }
+  }
+
+  async function copyCode(code: string) {
+    await navigator.clipboard.writeText(code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   return (
     <div className="min-h-svh flex items-center justify-center p-6">
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <GitPullRequest className="size-6 text-primary" />
-            <CardTitle className="text-2xl">Prism</CardTitle>
+        <CardHeader className="text-center">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <GitPullRequest className="size-7 text-primary" />
+            <CardTitle className="text-3xl">Prism</CardTitle>
           </div>
           <CardDescription>
-            Conecte sua conta do GitHub usando um Personal Access Token. O token
-            fica salvo no keychain do sistema.
+            Cliente desktop para Pull Requests do GitHub.
           </CardDescription>
         </CardHeader>
-        <form onSubmit={handleSubmit}>
-          <CardContent className="flex flex-col gap-4">
-            <Input
-              type="password"
-              placeholder="ghp_..."
-              autoComplete="off"
-              autoFocus
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              disabled={submitting}
-            />
-            {error && (
-              <p className="text-sm text-destructive break-words">{error}</p>
-            )}
-            <a
-              href={PAT_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5"
-            >
-              Criar um token no GitHub
-              <ExternalLink className="size-3.5" />
-            </a>
-            <p className="text-xs text-muted-foreground">
-              Escopos necessários: <code>repo</code> e <code>read:org</code>.
-            </p>
-          </CardContent>
-          <CardFooter>
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={submitting || !token.trim()}
-            >
-              {submitting && <Loader2 className="size-4 animate-spin" />}
-              Entrar
+        <CardContent className="flex flex-col gap-4">
+          {state.step === 'idle' && (
+            <Button size="lg" className="w-full" onClick={startFlow}>
+              Entrar com GitHub
             </Button>
-          </CardFooter>
-        </form>
+          )}
+
+          {state.step === 'starting' && (
+            <Button size="lg" className="w-full" disabled>
+              <Loader2 className="size-4 animate-spin" />
+              Conectando...
+            </Button>
+          )}
+
+          {state.step === 'waiting' && (
+            <div className="flex flex-col items-center gap-4">
+              <p className="text-sm text-muted-foreground text-center">
+                Um navegador foi aberto. Cole o código abaixo para autorizar:
+              </p>
+              <button
+                type="button"
+                onClick={() => copyCode(state.code.user_code)}
+                className="flex items-center gap-3 px-6 py-3 rounded-lg bg-secondary text-2xl font-mono font-bold tracking-widest hover:bg-secondary/80 transition-colors"
+              >
+                {state.code.user_code}
+                {copied ? (
+                  <Check className="size-5 text-green-400" />
+                ) : (
+                  <Copy className="size-5 text-muted-foreground" />
+                )}
+              </button>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Aguardando autorização...
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  stopPolling()
+                  setState({ step: 'idle' })
+                }}
+              >
+                Cancelar
+              </Button>
+            </div>
+          )}
+
+          {state.step === 'error' && (
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-sm text-destructive text-center break-words">
+                {state.message}
+              </p>
+              <Button variant="outline" onClick={startFlow}>
+                Tentar novamente
+              </Button>
+            </div>
+          )}
+        </CardContent>
       </Card>
     </div>
   )

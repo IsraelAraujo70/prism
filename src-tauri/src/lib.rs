@@ -18,7 +18,8 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       commands::get_auth_status,
-      commands::save_token,
+      commands::start_device_flow,
+      commands::poll_device_flow,
       commands::logout,
       commands::list_repos,
     ])

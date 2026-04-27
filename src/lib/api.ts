@@ -29,9 +29,27 @@ export type AuthStatus = {
   user: GithubUser | null
 }
 
+export type DeviceCodeResponse = {
+  device_code: string
+  user_code: string
+  verification_uri: string
+  verification_uri_complete: string | null
+  expires_in: number
+  interval: number
+}
+
+export type DevicePollResult =
+  | { status: 'pending' }
+  | { status: 'slow_down'; interval: number }
+  | { status: 'success'; user: GithubUser }
+  | { status: 'expired' }
+  | { status: 'denied' }
+
 export const api = {
   getAuthStatus: () => invoke<AuthStatus>('get_auth_status'),
-  saveToken: (token: string) => invoke<AuthStatus>('save_token', { token }),
+  startDeviceFlow: () => invoke<DeviceCodeResponse>('start_device_flow'),
+  pollDeviceFlow: (deviceCode: string) =>
+    invoke<DevicePollResult>('poll_device_flow', { deviceCode }),
   logout: () => invoke<void>('logout'),
   listRepos: () => invoke<Repo[]>('list_repos'),
 }

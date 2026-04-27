@@ -1,6 +1,8 @@
 use crate::auth;
 use crate::error::{AppError, AppResult};
-use crate::github::{Client, GithubUser, Repo};
+use crate::github::{
+    self, Client, DeviceCodeResponse, DevicePollResult, GithubUser, PollOutcome, Repo,
+};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -26,15 +28,28 @@ pub async fn get_auth_status() -> AppResult<AuthStatus> {
 }
 
 #[tauri::command]
-pub async fn save_token(token: String) -> AppResult<AuthStatus> {
-    let token = token.trim().to_string();
-    if token.is_empty() {
-        return Err(AppError::InvalidToken("token is empty".into()));
+pub async fn start_device_flow() -> AppResult<DeviceCodeResponse> {
+    let response = github::request_device_code().await?;
+    let url = response
+        .verification_uri_complete
+        .as_deref()
+        .unwrap_or(&response.verification_uri);
+    open::that(url).ok();
+    Ok(response)
+}
+
+#[tauri::command]
+pub async fn poll_device_flow(device_code: String) -> AppResult<DevicePollResult> {
+    match github::poll_for_token(&device_code).await? {
+        PollOutcome::Success { token, user } => {
+            auth::save_token(&token)?;
+            Ok(DevicePollResult::Success { user })
+        }
+        PollOutcome::Pending => Ok(DevicePollResult::Pending),
+        PollOutcome::SlowDown { interval } => Ok(DevicePollResult::SlowDown { interval }),
+        PollOutcome::Expired => Ok(DevicePollResult::Expired),
+        PollOutcome::Denied => Ok(DevicePollResult::Denied),
     }
-    let client = Client::new(token.clone())?;
-    let user = client.get_user().await?;
-    auth::save_token(&token)?;
-    Ok(AuthStatus { authenticated: true, user: Some(user) })
 }
 
 #[tauri::command]
