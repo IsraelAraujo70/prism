@@ -38,7 +38,7 @@ function App() {
 
   if (state.kind === 'loading') {
     return (
-      <main className="min-h-svh flex items-center justify-center text-muted-foreground">
+      <main className="min-h-svh flex items-center justify-center bg-background text-muted-foreground">
         <Loader2 className="size-5 animate-spin" />
       </main>
     )
@@ -46,11 +46,11 @@ function App() {
 
   if (state.kind === 'error') {
     return (
-      <main className="min-h-svh flex items-center justify-center p-6 text-center">
+      <main className="min-h-svh flex items-center justify-center bg-background p-6 text-center">
         <div>
           <p className="text-sm text-destructive mb-2">{state.message}</p>
           <button
-            className="text-sm underline"
+            className="text-sm text-muted-foreground underline hover:text-foreground"
             onClick={() => setState({ kind: 'unauthenticated' })}
           >
             Tentar de novo
@@ -70,17 +70,23 @@ function App() {
 
   const user = state.status.user!
   return (
-    <div className="h-svh flex">
-      <aside className="w-72 border-r flex flex-col bg-sidebar text-sidebar-foreground">
-        <div className="flex items-center gap-2 px-4 py-3 border-b">
+    <div className="flex h-svh bg-background">
+      <aside className="flex h-full w-72 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4">
           <GitPullRequest className="size-5 text-primary" />
-          <span className="font-semibold">Prism</span>
+          <span className="text-base font-semibold tracking-tight">
+            Prism
+          </span>
         </div>
+
         <RepoList />
         <UserMenu user={user} onLogout={handleLogout} />
       </aside>
-      <main className="flex-1 flex items-center justify-center text-muted-foreground">
-        <p className="text-sm">Selecione um repositório para ver os PRs.</p>
+
+      <main className="flex flex-1 items-center justify-center">
+        <p className="text-sm text-muted-foreground/60">
+          Selecione um repositório para ver os PRs.
+        </p>
       </main>
     </div>
   )
