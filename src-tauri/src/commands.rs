@@ -390,6 +390,378 @@ fn date_days_ago(days: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+// ── PR details ─────────────────────────────────────────
+
+#[derive(Debug, Serialize, Clone)]
+pub struct PrLabel {
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TimelineEntry {
+    Comment {
+        author: Option<PrAuthor>,
+        body: String,
+        created_at: String,
+    },
+    Review {
+        author: Option<PrAuthor>,
+        body: String,
+        state: String,
+        submitted_at: String,
+    },
+}
+
+#[derive(Debug, Serialize)]
+pub struct PrDetails {
+    pub id: i64,
+    pub number: i64,
+    pub title: String,
+    pub body: String,
+    pub state: String,
+    pub is_draft: bool,
+    pub html_url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub merged_at: Option<String>,
+    pub closed_at: Option<String>,
+    pub additions: i64,
+    pub deletions: i64,
+    pub changed_files: i64,
+    pub commits_count: i64,
+    pub mergeable: String,
+    pub base_ref: String,
+    pub head_ref: String,
+    pub author: Option<PrAuthor>,
+    pub repo: String,
+    pub labels: Vec<PrLabel>,
+    pub assignees: Vec<PrAuthor>,
+    pub review_requests: Vec<PrAuthor>,
+    pub timeline: Vec<TimelineEntry>,
+    pub checks_state: Option<String>,
+}
+
+const PR_DETAILS_QUERY: &str = r#"
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    nameWithOwner
+    pullRequest(number: $number) {
+      databaseId
+      number
+      title
+      body
+      state
+      isDraft
+      url
+      createdAt
+      updatedAt
+      mergedAt
+      closedAt
+      additions
+      deletions
+      changedFiles
+      mergeable
+      baseRefName
+      headRefName
+      author { login avatarUrl }
+      commitsCount: commits { totalCount }
+      labels(first: 20) { nodes { name color } }
+      assignees(first: 10) { nodes { login avatarUrl } }
+      reviewRequests(first: 10) {
+        nodes {
+          requestedReviewer {
+            ... on User { login avatarUrl }
+          }
+        }
+      }
+      comments(first: 100) {
+        nodes {
+          author { login avatarUrl }
+          body
+          createdAt
+        }
+      }
+      reviews(first: 50) {
+        nodes {
+          author { login avatarUrl }
+          body
+          state
+          submittedAt
+        }
+      }
+      lastCommit: commits(last: 1) {
+        nodes {
+          commit {
+            statusCheckRollup { state }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+#[derive(Deserialize)]
+struct PrGqlData {
+    repository: Option<PrGqlRepo>,
+}
+
+#[derive(Deserialize)]
+struct PrGqlRepo {
+    #[serde(rename = "nameWithOwner")]
+    name_with_owner: String,
+    #[serde(rename = "pullRequest")]
+    pull_request: Option<PrGqlNode>,
+}
+
+#[derive(Deserialize)]
+struct PrGqlNode {
+    #[serde(rename = "databaseId")]
+    database_id: Option<i64>,
+    number: i64,
+    title: String,
+    #[serde(default)]
+    body: String,
+    state: String,
+    #[serde(rename = "isDraft")]
+    is_draft: bool,
+    url: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
+    #[serde(rename = "mergedAt")]
+    merged_at: Option<String>,
+    #[serde(rename = "closedAt")]
+    closed_at: Option<String>,
+    additions: i64,
+    deletions: i64,
+    #[serde(rename = "changedFiles")]
+    changed_files: i64,
+    mergeable: String,
+    #[serde(rename = "baseRefName")]
+    base_ref_name: String,
+    #[serde(rename = "headRefName")]
+    head_ref_name: String,
+    author: Option<GqlUser>,
+    #[serde(rename = "commitsCount")]
+    commits_count: GqlTotalCount,
+    labels: GqlLabelConnection,
+    assignees: GqlUserConnection,
+    #[serde(rename = "reviewRequests")]
+    review_requests: GqlReviewRequestConnection,
+    comments: GqlCommentConnection,
+    reviews: GqlReviewConnection,
+    #[serde(rename = "lastCommit")]
+    last_commit: GqlCommitConnection,
+}
+
+#[derive(Deserialize)]
+struct GqlUser {
+    login: String,
+    #[serde(rename = "avatarUrl")]
+    avatar_url: String,
+}
+
+#[derive(Deserialize)]
+struct GqlTotalCount {
+    #[serde(rename = "totalCount")]
+    total_count: i64,
+}
+
+#[derive(Deserialize)]
+struct GqlLabelConnection {
+    nodes: Vec<GqlLabelNode>,
+}
+
+#[derive(Deserialize)]
+struct GqlLabelNode {
+    name: String,
+    color: String,
+}
+
+#[derive(Deserialize)]
+struct GqlUserConnection {
+    nodes: Vec<GqlUser>,
+}
+
+#[derive(Deserialize)]
+struct GqlReviewRequestConnection {
+    nodes: Vec<GqlReviewRequestNode>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GqlReviewRequestNode {
+    #[serde(rename = "requestedReviewer")]
+    requested_reviewer: Option<GqlUser>,
+}
+
+#[derive(Deserialize)]
+struct GqlCommentConnection {
+    nodes: Vec<GqlCommentNode>,
+}
+
+#[derive(Deserialize)]
+struct GqlCommentNode {
+    author: Option<GqlUser>,
+    #[serde(default)]
+    body: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+}
+
+#[derive(Deserialize)]
+struct GqlReviewConnection {
+    nodes: Vec<GqlReviewNode>,
+}
+
+#[derive(Deserialize)]
+struct GqlReviewNode {
+    author: Option<GqlUser>,
+    #[serde(default)]
+    body: String,
+    state: String,
+    #[serde(rename = "submittedAt")]
+    submitted_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GqlCommitConnection {
+    nodes: Vec<GqlCommitNode>,
+}
+
+#[derive(Deserialize)]
+struct GqlCommitNode {
+    commit: GqlCommit,
+}
+
+#[derive(Deserialize)]
+struct GqlCommit {
+    #[serde(rename = "statusCheckRollup")]
+    status_check_rollup: Option<GqlRollup>,
+}
+
+#[derive(Deserialize)]
+struct GqlRollup {
+    state: String,
+}
+
+fn user_to_author(u: GqlUser) -> PrAuthor {
+    PrAuthor {
+        login: u.login,
+        avatar_url: u.avatar_url,
+    }
+}
+
+#[tauri::command]
+pub async fn get_pr_details(
+    owner: String,
+    name: String,
+    number: i64,
+) -> AppResult<PrDetails> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+
+    let variables = serde_json::json!({
+        "owner": owner,
+        "name": name,
+        "number": number,
+    });
+
+    let data: PrGqlData = client.graphql(PR_DETAILS_QUERY, variables).await?;
+    let repo = data
+        .repository
+        .ok_or_else(|| AppError::InvalidToken("Repositório não encontrado".into()))?;
+    let pr = repo
+        .pull_request
+        .ok_or_else(|| AppError::InvalidToken("PR não encontrado".into()))?;
+
+    let labels: Vec<PrLabel> = pr
+        .labels
+        .nodes
+        .into_iter()
+        .map(|l| PrLabel {
+            name: l.name,
+            color: l.color,
+        })
+        .collect();
+
+    let assignees: Vec<PrAuthor> = pr.assignees.nodes.into_iter().map(user_to_author).collect();
+
+    let review_requests: Vec<PrAuthor> = pr
+        .review_requests
+        .nodes
+        .into_iter()
+        .filter_map(|n| n.requested_reviewer.map(user_to_author))
+        .collect();
+
+    let mut timeline: Vec<TimelineEntry> = Vec::new();
+    for c in pr.comments.nodes {
+        timeline.push(TimelineEntry::Comment {
+            author: c.author.map(user_to_author),
+            body: c.body,
+            created_at: c.created_at,
+        });
+    }
+    for r in pr.reviews.nodes {
+        if let Some(submitted_at) = r.submitted_at {
+            timeline.push(TimelineEntry::Review {
+                author: r.author.map(user_to_author),
+                body: r.body,
+                state: r.state,
+                submitted_at,
+            });
+        }
+    }
+    timeline.sort_by(|a, b| timeline_at(a).cmp(timeline_at(b)));
+
+    let checks_state = pr
+        .last_commit
+        .nodes
+        .into_iter()
+        .next()
+        .and_then(|n| n.commit.status_check_rollup)
+        .map(|r| r.state);
+
+    Ok(PrDetails {
+        id: pr.database_id.unwrap_or(0),
+        number: pr.number,
+        title: pr.title,
+        body: pr.body,
+        state: pr.state,
+        is_draft: pr.is_draft,
+        html_url: pr.url,
+        created_at: pr.created_at,
+        updated_at: pr.updated_at,
+        merged_at: pr.merged_at,
+        closed_at: pr.closed_at,
+        additions: pr.additions,
+        deletions: pr.deletions,
+        changed_files: pr.changed_files,
+        commits_count: pr.commits_count.total_count,
+        mergeable: pr.mergeable,
+        base_ref: pr.base_ref_name,
+        head_ref: pr.head_ref_name,
+        author: pr.author.map(user_to_author),
+        repo: repo.name_with_owner,
+        labels,
+        assignees,
+        review_requests,
+        timeline,
+        checks_state,
+    })
+}
+
+fn timeline_at(e: &TimelineEntry) -> &str {
+    match e {
+        TimelineEntry::Comment { created_at, .. } => created_at,
+        TimelineEntry::Review { submitted_at, .. } => submitted_at,
+    }
+}
+
 // ── GitHub API ─────────────────────────────────────────
 
 #[tauri::command]

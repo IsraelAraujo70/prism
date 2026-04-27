@@ -99,6 +99,54 @@ export type Dashboard = {
   contributors: ContributorStat[]
 }
 
+export type PrLabel = {
+  name: string
+  color: string
+}
+
+export type TimelineEntry =
+  | {
+      kind: 'comment'
+      author: PrAuthor | null
+      body: string
+      created_at: string
+    }
+  | {
+      kind: 'review'
+      author: PrAuthor | null
+      body: string
+      state: string
+      submitted_at: string
+    }
+
+export type PrDetails = {
+  id: number
+  number: number
+  title: string
+  body: string
+  state: string
+  is_draft: boolean
+  html_url: string
+  created_at: string
+  updated_at: string
+  merged_at: string | null
+  closed_at: string | null
+  additions: number
+  deletions: number
+  changed_files: number
+  commits_count: number
+  mergeable: string
+  base_ref: string
+  head_ref: string
+  author: PrAuthor | null
+  repo: string
+  labels: PrLabel[]
+  assignees: PrAuthor[]
+  review_requests: PrAuthor[]
+  timeline: TimelineEntry[]
+  checks_state: string | null
+}
+
 export const api = {
   getAuthStatus: () => invoke<AuthStatus>('get_auth_status'),
   startDeviceFlow: () => invoke<DeviceCodeResponse>('start_device_flow'),
@@ -126,4 +174,7 @@ export const api = {
 
   getDashboard: (repoFullName?: string | null) =>
     invoke<Dashboard>('get_dashboard', { repoFullName: repoFullName ?? null }),
+
+  getPrDetails: (owner: string, name: string, number: number) =>
+    invoke<PrDetails>('get_pr_details', { owner, name, number }),
 }

@@ -1,17 +1,18 @@
-import {
-  GitPullRequest,
-  Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
-} from 'lucide-react'
+import { Loader2, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import { Dashboard } from '@/components/dashboard'
 import { LoginForm } from '@/components/login-form'
+import { PrViewer } from '@/components/pr-viewer'
 import { RepoList } from '@/components/repo-list'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { UserMenu } from '@/components/user-menu'
-import { api, type AuthStatus, type WatchedRepo } from '@/lib/api'
+import {
+  api,
+  type AuthStatus,
+  type PullRequestRef,
+  type WatchedRepo,
+} from '@/lib/api'
 
 const COLLAPSED_KEY = 'prism.sidebar-collapsed'
 
@@ -27,6 +28,7 @@ function App() {
     () => localStorage.getItem(COLLAPSED_KEY) === '1',
   )
   const [selectedRepo, setSelectedRepo] = useState<WatchedRepo | null>(null)
+  const [selectedPr, setSelectedPr] = useState<PullRequestRef | null>(null)
 
   useEffect(() => {
     api
@@ -116,12 +118,16 @@ function App() {
             aria-label="Expandir sidebar"
             title="Expandir (Ctrl+B)"
           >
-            <GitPullRequest className="size-5 text-primary transition-opacity group-hover:opacity-0" />
+            <img
+              src="/icon.png"
+              alt="Prism"
+              className="size-8 transition-opacity group-hover:opacity-0"
+            />
             <PanelLeftOpen className="absolute size-5 text-sidebar-foreground/60 opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
         ) : (
           <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-3">
-            <GitPullRequest className="size-5 shrink-0 text-primary" />
+            <img src="/icon.png" alt="Prism" className="size-8 shrink-0" />
             <span className="flex-1 text-base font-semibold tracking-tight">
               Prism
             </span>
@@ -141,7 +147,10 @@ function App() {
           collapsed={collapsed}
           settingsSlot={<SettingsDialog />}
           selectedId={selectedRepo?.id ?? null}
-          onSelectRepo={setSelectedRepo}
+          onSelectRepo={(repo) => {
+            setSelectedRepo(repo)
+            setSelectedPr(null)
+          }}
           onRepoRemoved={(id) => {
             if (selectedRepo?.id === id) setSelectedRepo(null)
           }}
@@ -149,7 +158,15 @@ function App() {
         <UserMenu user={user} onLogout={handleLogout} collapsed={collapsed} />
       </aside>
 
-      <Dashboard repo={selectedRepo} onClear={() => setSelectedRepo(null)} />
+      {selectedPr ? (
+        <PrViewer pr={selectedPr} onBack={() => setSelectedPr(null)} />
+      ) : (
+        <Dashboard
+          repo={selectedRepo}
+          onClear={() => setSelectedRepo(null)}
+          onSelectPr={setSelectedPr}
+        />
+      )}
     </div>
   )
 }

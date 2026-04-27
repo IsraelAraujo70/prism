@@ -28,6 +28,7 @@ import {
   type PullRequestRef,
   type WatchedRepo,
 } from '@/lib/api'
+import { formatRelative } from '@/lib/format'
 
 type State =
   | { status: 'loading' }
@@ -37,9 +38,10 @@ type State =
 type Props = {
   repo?: WatchedRepo | null
   onClear?: () => void
+  onSelectPr?: (pr: PullRequestRef) => void
 }
 
-export function Dashboard({ repo, onClear }: Props) {
+export function Dashboard({ repo, onClear, onSelectPr }: Props) {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [refreshing, setRefreshing] = useState(false)
 
@@ -144,7 +146,7 @@ export function Dashboard({ repo, onClear }: Props) {
           {state.status === 'ready' && noWatched && <EmptyState />}
 
           {state.status === 'ready' && !noWatched && (
-            <DashboardContent data={state.data} />
+            <DashboardContent data={state.data} onSelectPr={onSelectPr} />
           )}
         </div>
       </div>
@@ -152,7 +154,13 @@ export function Dashboard({ repo, onClear }: Props) {
   )
 }
 
-function DashboardContent({ data }: { data: DashboardData }) {
+function DashboardContent({
+  data,
+  onSelectPr,
+}: {
+  data: DashboardData
+  onSelectPr?: (pr: PullRequestRef) => void
+}) {
   return (
     <>
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -189,12 +197,14 @@ function DashboardContent({ data }: { data: DashboardData }) {
           count={data.awaiting_your_review.length}
           items={data.awaiting_your_review}
           emptyHint="Tudo em dia. Nenhum PR esperando você."
+          onSelectPr={onSelectPr}
         />
         <NotificationList
           title="Seus PRs em revisão"
           count={data.your_open_prs.length}
           items={data.your_open_prs}
           emptyHint="Você não tem PRs abertos no momento."
+          onSelectPr={onSelectPr}
         />
       </section>
 
@@ -283,11 +293,13 @@ function NotificationList({
   count,
   items,
   emptyHint,
+  onSelectPr,
 }: {
   title: string
   count: number
   items: PullRequestRef[]
   emptyHint: string
+  onSelectPr?: (pr: PullRequestRef) => void
 }) {
   return (
     <Card size="sm" className="gap-0">
@@ -318,7 +330,9 @@ function NotificationList({
               >
                 <button
                   type="button"
-                  onClick={() => api.openUrl(item.html_url)}
+                  onClick={() =>
+                    onSelectPr ? onSelectPr(item) : api.openUrl(item.html_url)
+                  }
                   className="group flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent"
                 >
                   <Avatar className="size-6 shrink-0 mt-0.5">
@@ -411,19 +425,3 @@ function EmptyState() {
   )
 }
 
-function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return ''
-  const diffMs = Date.now() - then
-  const sec = Math.max(1, Math.floor(diffMs / 1000))
-  if (sec < 60) return `${sec}s`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m`
-  const hr = Math.floor(min / 60)
-  if (hr < 24) return `${hr}h`
-  const day = Math.floor(hr / 24)
-  if (day < 30) return `${day}d`
-  const mo = Math.floor(day / 30)
-  if (mo < 12) return `${mo}mo`
-  return `${Math.floor(mo / 12)}y`
-}
