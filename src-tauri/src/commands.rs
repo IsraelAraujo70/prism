@@ -1,9 +1,11 @@
 use crate::auth;
+use crate::db::{self, DbState, WatchedRepo};
 use crate::error::{AppError, AppResult};
 use crate::github::{
     self, Client, DeviceCodeResponse, DevicePollResult, GithubUser, PollOutcome, Repo,
 };
 use serde::Serialize;
+use tauri::State;
 
 #[derive(Debug, Serialize)]
 pub struct AuthStatus {
@@ -57,8 +59,38 @@ pub async fn logout() -> AppResult<()> {
     auth::delete_token()
 }
 
+// ── Watched repos (SQLite) ─────────────────────────────
+
 #[tauri::command]
-pub async fn list_repos() -> AppResult<Vec<Repo>> {
+pub async fn get_watched_repos(db: State<'_, DbState>) -> AppResult<Vec<WatchedRepo>> {
+    let conn = db.0.lock().unwrap();
+    Ok(db::list_watched(&conn))
+}
+
+#[tauri::command]
+pub async fn add_watched_repo(repo: WatchedRepo, db: State<'_, DbState>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    db::add_watched(&conn, &repo);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_watched_repo(repo_id: i64, db: State<'_, DbState>) -> AppResult<()> {
+    let conn = db.0.lock().unwrap();
+    db::remove_watched(&conn, repo_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_watched_ids(db: State<'_, DbState>) -> AppResult<Vec<i64>> {
+    let conn = db.0.lock().unwrap();
+    Ok(db::watched_ids(&conn))
+}
+
+// ── GitHub API ─────────────────────────────────────────
+
+#[tauri::command]
+pub async fn list_all_repos() -> AppResult<Vec<Repo>> {
     let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
     Client::new(token)?.list_repos().await
 }

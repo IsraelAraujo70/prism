@@ -24,6 +24,17 @@ export type Repo = {
   owner: RepoOwner
 }
 
+export type WatchedRepo = {
+  id: number
+  name: string
+  full_name: string
+  description: string | null
+  private: boolean
+  html_url: string
+  owner_login: string
+  owner_avatar_url: string
+}
+
 export type AuthStatus = {
   authenticated: boolean
   user: GithubUser | null
@@ -51,5 +62,13 @@ export const api = {
   pollDeviceFlow: (deviceCode: string) =>
     invoke<DevicePollResult>('poll_device_flow', { deviceCode }),
   logout: () => invoke<void>('logout'),
-  listRepos: () => invoke<Repo[]>('list_repos'),
+
+  getWatchedRepos: () => invoke<WatchedRepo[]>('get_watched_repos'),
+  addWatchedRepo: (repo: WatchedRepo) =>
+    invoke<void>('add_watched_repo', { repo }),
+  removeWatchedRepo: (repoId: number) =>
+    invoke<void>('remove_watched_repo', { repoId }),
+  getWatchedIds: () => invoke<number[]>('get_watched_ids'),
+
+  listAllRepos: () => invoke<Repo[]>('list_all_repos'),
 }
