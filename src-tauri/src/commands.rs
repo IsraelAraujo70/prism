@@ -399,6 +399,14 @@ pub struct PrLabel {
 }
 
 #[derive(Debug, Serialize, Clone)]
+pub struct ThreadComment {
+    pub author: Option<PrAuthor>,
+    pub body: String,
+    pub created_at: String,
+    pub state: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TimelineEntry {
     Comment {
@@ -411,6 +419,14 @@ pub enum TimelineEntry {
         body: String,
         state: String,
         submitted_at: String,
+    },
+    ReviewThread {
+        path: String,
+        line: Option<i64>,
+        is_resolved: bool,
+        is_outdated: bool,
+        comments: Vec<ThreadComment>,
+        created_at: String,
     },
 }
 
@@ -431,6 +447,7 @@ pub struct CheckEntry {
 #[derive(Debug, Serialize)]
 pub struct PrDetails {
     pub id: i64,
+    pub node_id: String,
     pub number: i64,
     pub title: String,
     pub body: String,
@@ -463,6 +480,7 @@ query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
     pullRequest(number: $number) {
+      id
       databaseId
       number
       title
@@ -504,6 +522,23 @@ query($owner: String!, $name: String!, $number: Int!) {
           body
           state
           submittedAt
+        }
+      }
+      reviewThreads(first: 50) {
+        nodes {
+          path
+          line
+          originalLine
+          isResolved
+          isOutdated
+          comments(first: 50) {
+            nodes {
+              author { login avatarUrl }
+              body
+              createdAt
+              state
+            }
+          }
         }
       }
       lastCommit: commits(last: 1) {
@@ -560,6 +595,7 @@ struct PrGqlRepo {
 
 #[derive(Deserialize)]
 struct PrGqlNode {
+    id: String,
     #[serde(rename = "databaseId")]
     database_id: Option<i64>,
     number: i64,
@@ -596,8 +632,43 @@ struct PrGqlNode {
     review_requests: GqlReviewRequestConnection,
     comments: GqlCommentConnection,
     reviews: GqlReviewConnection,
+    #[serde(rename = "reviewThreads")]
+    review_threads: GqlThreadConnection,
     #[serde(rename = "lastCommit")]
     last_commit: GqlCommitConnection,
+}
+
+#[derive(Deserialize)]
+struct GqlThreadConnection {
+    nodes: Vec<GqlThreadNode>,
+}
+
+#[derive(Deserialize)]
+struct GqlThreadNode {
+    path: String,
+    line: Option<i64>,
+    #[serde(rename = "originalLine")]
+    original_line: Option<i64>,
+    #[serde(rename = "isResolved")]
+    is_resolved: bool,
+    #[serde(rename = "isOutdated")]
+    is_outdated: bool,
+    comments: GqlThreadCommentConnection,
+}
+
+#[derive(Deserialize)]
+struct GqlThreadCommentConnection {
+    nodes: Vec<GqlThreadComment>,
+}
+
+#[derive(Deserialize)]
+struct GqlThreadComment {
+    author: Option<GqlUser>,
+    #[serde(default)]
+    body: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    state: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -806,7 +877,7 @@ pub async fn get_pr_details(
         });
     }
     for r in pr.reviews.nodes {
-        if let Some(submitted_at) = r.submitted_at {
+        if let (Some(submitted_at), false) = (r.submitted_at.clone(), r.body.is_empty() && r.state == "PENDING") {
             timeline.push(TimelineEntry::Review {
                 author: r.author.map(user_to_author),
                 body: r.body,
@@ -814,6 +885,31 @@ pub async fn get_pr_details(
                 submitted_at,
             });
         }
+    }
+    for t in pr.review_threads.nodes {
+        let comments: Vec<ThreadComment> = t
+            .comments
+            .nodes
+            .into_iter()
+            .map(|c| ThreadComment {
+                author: c.author.map(user_to_author),
+                body: c.body,
+                created_at: c.created_at,
+                state: c.state,
+            })
+            .collect();
+        let created_at = comments
+            .first()
+            .map(|c| c.created_at.clone())
+            .unwrap_or_default();
+        timeline.push(TimelineEntry::ReviewThread {
+            path: t.path,
+            line: t.line.or(t.original_line),
+            is_resolved: t.is_resolved,
+            is_outdated: t.is_outdated,
+            comments,
+            created_at,
+        });
     }
     timeline.sort_by(|a, b| timeline_at(a).cmp(timeline_at(b)));
 
@@ -885,6 +981,7 @@ pub async fn get_pr_details(
 
     Ok(PrDetails {
         id: pr.database_id.unwrap_or(0),
+        node_id: pr.id,
         number: pr.number,
         title: pr.title,
         body: pr.body,
@@ -917,7 +1014,41 @@ fn timeline_at(e: &TimelineEntry) -> &str {
     match e {
         TimelineEntry::Comment { created_at, .. } => created_at,
         TimelineEntry::Review { submitted_at, .. } => submitted_at,
+        TimelineEntry::ReviewThread { created_at, .. } => created_at,
     }
+}
+
+const MERGE_MUTATION: &str = r#"
+mutation($input: MergePullRequestInput!) {
+  mergePullRequest(input: $input) {
+    pullRequest { state merged mergedAt }
+  }
+}
+"#;
+
+#[tauri::command]
+pub async fn merge_pull_request(
+    pr_node_id: String,
+    method: String,
+) -> AppResult<()> {
+    let upper = method.to_uppercase();
+    let merge_method = match upper.as_str() {
+        "MERGE" | "SQUASH" | "REBASE" => upper,
+        _ => return Err(AppError::InvalidToken(format!("método inválido: {method}"))),
+    };
+
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+
+    let variables = serde_json::json!({
+        "input": {
+            "pullRequestId": pr_node_id,
+            "mergeMethod": merge_method,
+        }
+    });
+
+    let _: serde_json::Value = client.graphql(MERGE_MUTATION, variables).await?;
+    Ok(())
 }
 
 // ── GitHub API ─────────────────────────────────────────

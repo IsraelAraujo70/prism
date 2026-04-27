@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   CircleDashed,
   ExternalLink,
   FileText,
@@ -15,7 +16,7 @@ import {
   RefreshCw,
   type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Markdown } from '@/components/markdown'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -40,9 +41,13 @@ type Props = {
   onBack: () => void
 }
 
+type MergeMethod = 'MERGE' | 'SQUASH' | 'REBASE'
+
 export function PrViewer({ pr, onBack }: Props) {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [refreshing, setRefreshing] = useState(false)
+  const [merging, setMerging] = useState(false)
+  const [mergeError, setMergeError] = useState<string | null>(null)
 
   const [owner, name] = pr.repo.split('/')
 
@@ -65,6 +70,22 @@ export function PrViewer({ pr, onBack }: Props) {
   useEffect(() => {
     load()
   }, [load])
+
+  const doMerge = useCallback(
+    async (nodeId: string, method: MergeMethod) => {
+      setMergeError(null)
+      setMerging(true)
+      try {
+        await api.mergePullRequest(nodeId, method)
+        await load(true)
+      } catch (err) {
+        setMergeError(String(err))
+      } finally {
+        setMerging(false)
+      }
+    },
+    [load],
+  )
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
@@ -120,16 +141,35 @@ export function PrViewer({ pr, onBack }: Props) {
             </div>
           )}
 
-          {state.status === 'ready' && <PrBody data={state.data} />}
+          {state.status === 'ready' && (
+            <PrBody
+              data={state.data}
+              merging={merging}
+              mergeError={mergeError}
+              onMerge={(method) => doMerge(state.data.node_id, method)}
+            />
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-function PrBody({ data }: { data: PrDetails }) {
+function PrBody({
+  data,
+  merging,
+  mergeError,
+  onMerge,
+}: {
+  data: PrDetails
+  merging: boolean
+  mergeError: string | null
+  onMerge: (method: MergeMethod) => void
+}) {
   const status = resolveStatus(data)
   const reviewers = mergeReviewers(data)
+  const canMerge =
+    status === 'open' && data.mergeable === 'MERGEABLE' && !data.is_draft
 
   return (
     <>
@@ -204,6 +244,17 @@ function PrBody({ data }: { data: PrDetails }) {
 
       {(data.checks.length > 0 || data.checks_state) && (
         <ChecksSection checks={data.checks} rollupState={data.checks_state} />
+      )}
+
+      {status === 'open' && (
+        <MergeSection
+          canMerge={canMerge}
+          mergeable={data.mergeable}
+          isDraft={data.is_draft}
+          merging={merging}
+          mergeError={mergeError}
+          onMerge={onMerge}
+        />
       )}
 
       {data.body.trim().length > 0 && (
@@ -619,7 +670,120 @@ function formatDuration(
   return `${hr}h ${min % 60}m`
 }
 
+function MergeSection({
+  canMerge,
+  mergeable,
+  isDraft,
+  merging,
+  mergeError,
+  onMerge,
+}: {
+  canMerge: boolean
+  mergeable: string
+  isDraft: boolean
+  merging: boolean
+  mergeError: string | null
+  onMerge: (method: MergeMethod) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  let blockReason: string | null = null
+  if (isDraft) blockReason = 'PR está como Draft. Marque como Ready for review primeiro.'
+  else if (mergeable === 'CONFLICTING')
+    blockReason = 'Existem conflitos com a branch base. Resolva antes de mergear.'
+  else if (mergeable === 'UNKNOWN')
+    blockReason = 'GitHub ainda calculando se é mergeable. Tente atualizar.'
+
+  const methods: { key: MergeMethod; label: string; hint: string }[] = [
+    { key: 'MERGE', label: 'Create a merge commit', hint: 'Mantém os commits + um merge commit' },
+    { key: 'SQUASH', label: 'Squash and merge', hint: 'Combina todos commits em um' },
+    { key: 'REBASE', label: 'Rebase and merge', hint: 'Aplica os commits sem merge commit' },
+  ]
+
+  return (
+    <section className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+      <div className="flex items-center gap-3">
+        <GitMerge
+          className={`size-4 shrink-0 ${canMerge ? 'text-emerald-400' : 'text-muted-foreground'}`}
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="text-sm font-medium text-foreground">
+            {canMerge ? 'Pronto pra mergear' : 'Não pode mergear ainda'}
+          </span>
+          {blockReason && (
+            <span className="text-xs text-muted-foreground">{blockReason}</span>
+          )}
+        </div>
+        {canMerge && (
+          <div ref={ref} className="relative">
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              disabled={merging}
+              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-400 ring-1 ring-emerald-500/20 transition-colors hover:bg-emerald-500/25 disabled:opacity-50"
+            >
+              {merging ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Mergeando…
+                </>
+              ) : (
+                <>
+                  <GitMerge className="size-3.5" />
+                  Merge
+                  <ChevronDown className="size-3" />
+                </>
+              )}
+            </button>
+            {open && !merging && (
+              <div className="absolute right-0 top-full z-10 mt-1 w-72 rounded-md border border-border bg-popover p-1 shadow-md">
+                {methods.map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => {
+                      setOpen(false)
+                      onMerge(m.key)
+                    }}
+                    className="flex w-full flex-col items-start rounded-md px-3 py-2 text-left transition-colors hover:bg-accent"
+                  >
+                    <span className="text-sm text-foreground">{m.label}</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {m.hint}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {mergeError && (
+        <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {mergeError}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function TimelineItem({ entry }: { entry: TimelineEntry }) {
+  if (entry.kind === 'review_thread') {
+    return <ReviewThreadItem entry={entry} />
+  }
+
   if (entry.kind === 'comment') {
     return (
       <li className="rounded-xl bg-card ring-1 ring-foreground/10">
@@ -725,6 +889,111 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
           <Markdown>{entry.body}</Markdown>
         </div>
       )}
+    </li>
+  )
+}
+
+function ReviewThreadItem({
+  entry,
+}: {
+  entry: Extract<TimelineEntry, { kind: 'review_thread' }>
+}) {
+  const first = entry.comments[0]
+  return (
+    <li className="rounded-xl bg-card ring-1 ring-foreground/10">
+      <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+        {first?.author && (
+          <>
+            <Avatar className="size-6">
+              <AvatarImage
+                src={first.author.avatar_url}
+                alt={first.author.login}
+              />
+              <AvatarFallback className="bg-muted text-[9px] font-semibold">
+                {first.author.login.slice(0, 2).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <span className="text-sm font-medium text-foreground">
+              {first.author.login}
+            </span>
+          </>
+        )}
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <MessageSquare className="size-3.5" />
+          comentou em
+        </span>
+        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/80">
+          {entry.path}
+          {entry.line != null && (
+            <span className="text-muted-foreground"> :{entry.line}</span>
+          )}
+        </code>
+        {entry.is_resolved && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400">
+            <Check className="size-3" />
+            resolved
+          </span>
+        )}
+        {entry.is_outdated && (
+          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+            outdated
+          </span>
+        )}
+        {first?.state === 'PENDING' && (
+          <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-400">
+            pending
+          </span>
+        )}
+        {first && (
+          <span
+            className="ml-auto text-xs text-muted-foreground/70"
+            title={formatAbsolute(first.created_at)}
+          >
+            {formatRelative(first.created_at)}
+          </span>
+        )}
+      </header>
+      <ul className="flex flex-col">
+        {entry.comments.map((c, i) => (
+          <li
+            key={i}
+            className={i > 0 ? 'border-t border-border/60' : ''}
+          >
+            <div className="flex items-start gap-3 px-4 py-3">
+              {i > 0 && c.author && (
+                <Avatar className="size-5 mt-0.5">
+                  <AvatarImage src={c.author.avatar_url} alt={c.author.login} />
+                  <AvatarFallback className="bg-muted text-[8px] font-semibold">
+                    {c.author.login.slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              )}
+              <div className="min-w-0 flex-1">
+                {i > 0 && c.author && (
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="text-xs font-medium text-foreground">
+                      {c.author.login}
+                    </span>
+                    <span
+                      className="text-[11px] text-muted-foreground/70"
+                      title={formatAbsolute(c.created_at)}
+                    >
+                      {formatRelative(c.created_at)}
+                    </span>
+                  </div>
+                )}
+                {c.body.trim().length > 0 ? (
+                  <Markdown>{c.body}</Markdown>
+                ) : (
+                  <p className="text-sm italic text-muted-foreground">
+                    (sem texto)
+                  </p>
+                )}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
     </li>
   )
 }

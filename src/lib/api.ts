@@ -104,6 +104,13 @@ export type PrLabel = {
   color: string
 }
 
+export type ThreadComment = {
+  author: PrAuthor | null
+  body: string
+  created_at: string
+  state: string | null
+}
+
 export type TimelineEntry =
   | {
       kind: 'comment'
@@ -117,6 +124,15 @@ export type TimelineEntry =
       body: string
       state: string
       submitted_at: string
+    }
+  | {
+      kind: 'review_thread'
+      path: string
+      line: number | null
+      is_resolved: boolean
+      is_outdated: boolean
+      comments: ThreadComment[]
+      created_at: string
     }
 
 export type CheckEntry = {
@@ -134,6 +150,7 @@ export type CheckEntry = {
 
 export type PrDetails = {
   id: number
+  node_id: string
   number: number
   title: string
   body: string
@@ -191,4 +208,7 @@ export const api = {
 
   getPrDetails: (owner: string, name: string, number: number) =>
     invoke<PrDetails>('get_pr_details', { owner, name, number }),
+
+  mergePullRequest: (prNodeId: string, method: 'MERGE' | 'SQUASH' | 'REBASE') =>
+    invoke<void>('merge_pull_request', { prNodeId, method }),
 }
