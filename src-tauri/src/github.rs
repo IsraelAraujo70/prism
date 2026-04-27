@@ -46,6 +46,25 @@ pub struct OrgRef {
     pub description: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrAuthor {
+    pub login: String,
+    pub avatar_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequestRef {
+    pub id: i64,
+    pub number: i64,
+    pub title: String,
+    pub html_url: String,
+    pub repo: String,
+    pub author: PrAuthor,
+    pub updated_at: String,
+    pub comments: i64,
+    pub draft: bool,
+}
+
 // ── Device Flow types ──────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,5 +231,50 @@ impl Client {
             return Ok(Vec::new());
         }
         Ok(res.error_for_status()?.json().await?)
+    }
+
+    pub async fn graphql<T: serde::de::DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: serde_json::Value,
+    ) -> AppResult<T> {
+        #[derive(Deserialize)]
+        struct GqlError {
+            message: String,
+        }
+        #[derive(Deserialize)]
+        struct GqlResponse<T> {
+            data: Option<T>,
+            #[serde(default)]
+            errors: Vec<GqlError>,
+        }
+
+        let res = self
+            .http
+            .post("https://api.github.com/graphql")
+            .header(USER_AGENT, UA)
+            .header(ACCEPT, "application/json")
+            .header(AUTHORIZATION, format!("Bearer {}", self.token))
+            .json(&serde_json::json!({"query": query, "variables": variables}))
+            .send()
+            .await?;
+
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::InvalidToken(
+                "GitHub rejected the token (401)".into(),
+            ));
+        }
+        let body: GqlResponse<T> = res.error_for_status()?.json().await?;
+        if !body.errors.is_empty() {
+            let msg = body
+                .errors
+                .iter()
+                .map(|e| e.message.as_str())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(AppError::InvalidToken(format!("GraphQL: {msg}")));
+        }
+        body.data
+            .ok_or_else(|| AppError::InvalidToken("GraphQL: empty data".into()))
     }
 }

@@ -62,6 +62,43 @@ export type DevicePollResult =
   | { status: 'expired' }
   | { status: 'denied' }
 
+export type PrAuthor = {
+  login: string
+  avatar_url: string
+}
+
+export type PullRequestRef = {
+  id: number
+  number: number
+  title: string
+  html_url: string
+  repo: string
+  author: PrAuthor
+  updated_at: string
+  comments: number
+  draft: boolean
+}
+
+export type ContributorStat = {
+  login: string
+  avatar_url: string
+  prs: number
+}
+
+export type DashboardStats = {
+  open_prs: number
+  merged_30d: number
+  awaiting_count: number
+  contributors_count: number
+}
+
+export type Dashboard = {
+  stats: DashboardStats
+  awaiting_your_review: PullRequestRef[]
+  your_open_prs: PullRequestRef[]
+  contributors: ContributorStat[]
+}
+
 export const api = {
   getAuthStatus: () => invoke<AuthStatus>('get_auth_status'),
   startDeviceFlow: () => invoke<DeviceCodeResponse>('start_device_flow'),
@@ -86,4 +123,7 @@ export const api = {
     invoke<void>('remove_tracked_org', { name }),
 
   listAllRepos: () => invoke<Repo[]>('list_all_repos'),
+
+  getDashboard: (repoFullName?: string | null) =>
+    invoke<Dashboard>('get_dashboard', { repoFullName: repoFullName ?? null }),
 }

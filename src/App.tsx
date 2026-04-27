@@ -6,11 +6,12 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
+import { Dashboard } from '@/components/dashboard'
 import { LoginForm } from '@/components/login-form'
 import { RepoList } from '@/components/repo-list'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { UserMenu } from '@/components/user-menu'
-import { api, type AuthStatus } from '@/lib/api'
+import { api, type AuthStatus, type WatchedRepo } from '@/lib/api'
 
 const COLLAPSED_KEY = 'prism.sidebar-collapsed'
 
@@ -25,6 +26,7 @@ function App() {
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(COLLAPSED_KEY) === '1',
   )
+  const [selectedRepo, setSelectedRepo] = useState<WatchedRepo | null>(null)
 
   useEffect(() => {
     api
@@ -135,15 +137,19 @@ function App() {
           </div>
         )}
 
-        <RepoList collapsed={collapsed} settingsSlot={<SettingsDialog />} />
+        <RepoList
+          collapsed={collapsed}
+          settingsSlot={<SettingsDialog />}
+          selectedId={selectedRepo?.id ?? null}
+          onSelectRepo={setSelectedRepo}
+          onRepoRemoved={(id) => {
+            if (selectedRepo?.id === id) setSelectedRepo(null)
+          }}
+        />
         <UserMenu user={user} onLogout={handleLogout} collapsed={collapsed} />
       </aside>
 
-      <main className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground/60">
-          Selecione um repositório para ver os PRs.
-        </p>
-      </main>
+      <Dashboard repo={selectedRepo} onClear={() => setSelectedRepo(null)} />
     </div>
   )
 }

@@ -42,9 +42,18 @@ function saveCollapsed(set: Set<string>) {
 type Props = {
   collapsed?: boolean
   settingsSlot?: ReactNode
+  selectedId?: number | null
+  onSelectRepo?: (repo: WatchedRepo) => void
+  onRepoRemoved?: (id: number) => void
 }
 
-export function RepoList({ collapsed = false, settingsSlot }: Props) {
+export function RepoList({
+  collapsed = false,
+  settingsSlot,
+  selectedId = null,
+  onSelectRepo,
+  onRepoRemoved,
+}: Props) {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [collapsedOrgs, setCollapsedOrgs] = useState<Set<string>>(() =>
     loadCollapsed(),
@@ -99,6 +108,7 @@ export function RepoList({ collapsed = false, settingsSlot }: Props) {
 
   async function removeRepo(id: number) {
     await api.removeWatchedRepo(id)
+    onRepoRemoved?.(id)
     load()
   }
 
@@ -195,6 +205,8 @@ export function RepoList({ collapsed = false, settingsSlot }: Props) {
                 collapsed={collapsedOrgs.has(group.owner)}
                 onToggle={() => toggleGroup(group.owner)}
                 onRemove={removeRepo}
+                selectedId={selectedId}
+                onSelectRepo={onSelectRepo}
               />
             ))}
           </div>
@@ -209,11 +221,15 @@ function OrgGroup({
   collapsed,
   onToggle,
   onRemove,
+  selectedId,
+  onSelectRepo,
 }: {
   group: Group
   collapsed: boolean
   onToggle: () => void
   onRemove: (id: number) => void
+  selectedId: number | null
+  onSelectRepo?: (repo: WatchedRepo) => void
 }) {
   return (
     <div className="flex flex-col">
@@ -245,6 +261,8 @@ function OrgGroup({
             <WatchedRepoItem
               key={repo.id}
               repo={repo}
+              active={repo.id === selectedId}
+              onSelect={() => onSelectRepo?.(repo)}
               onRemove={() => onRemove(repo.id)}
             />
           ))}
@@ -256,16 +274,40 @@ function OrgGroup({
 
 function WatchedRepoItem({
   repo,
+  active,
+  onSelect,
   onRemove,
 }: {
   repo: WatchedRepo
+  active: boolean
+  onSelect: () => void
   onRemove: () => void
 }) {
   return (
-    <div className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-sidebar-accent">
-      <button type="button" className="flex flex-1 items-center gap-2 min-w-0">
-        <GitFork className="size-3.5 shrink-0 text-sidebar-foreground/30 transition-colors group-hover:text-sidebar-foreground/60" />
-        <span className="truncate text-sm text-sidebar-foreground/80 group-hover:text-sidebar-foreground">
+    <div
+      className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 ${
+        active ? 'bg-sidebar-accent' : 'hover:bg-sidebar-accent'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        className="flex flex-1 items-center gap-2 min-w-0"
+      >
+        <GitFork
+          className={`size-3.5 shrink-0 transition-colors ${
+            active
+              ? 'text-sidebar-foreground/70'
+              : 'text-sidebar-foreground/30 group-hover:text-sidebar-foreground/60'
+          }`}
+        />
+        <span
+          className={`truncate text-sm transition-colors ${
+            active
+              ? 'text-sidebar-foreground'
+              : 'text-sidebar-foreground/80 group-hover:text-sidebar-foreground'
+          }`}
+        >
           {repo.name}
         </span>
         {repo.private && (
@@ -278,7 +320,11 @@ function WatchedRepoItem({
           e.stopPropagation()
           onRemove()
         }}
-        className="rounded-md p-1 text-sidebar-foreground/0 transition-colors group-hover:text-sidebar-foreground/40 hover:!text-destructive hover:!bg-destructive/10"
+        className={`rounded-md p-1 transition-colors hover:!text-destructive hover:!bg-destructive/10 ${
+          active
+            ? 'text-sidebar-foreground/40'
+            : 'text-sidebar-foreground/0 group-hover:text-sidebar-foreground/40'
+        }`}
         aria-label={`Remover ${repo.name}`}
       >
         <X className="size-3.5" />

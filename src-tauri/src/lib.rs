@@ -38,6 +38,7 @@ pub fn run() {
       commands::add_tracked_org,
       commands::remove_tracked_org,
       commands::list_all_repos,
+      commands::get_dashboard,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
