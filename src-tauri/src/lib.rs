@@ -40,6 +40,7 @@ pub fn run() {
       commands::list_all_repos,
       commands::get_dashboard,
       commands::get_pr_details,
+      commands::get_pr_files,
       commands::merge_pull_request,
     ])
     .run(tauri::generate_context!())

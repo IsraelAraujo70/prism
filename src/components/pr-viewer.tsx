@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { DiffViewer } from '@/components/diff-viewer'
 import { Markdown } from '@/components/markdown'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -26,6 +27,7 @@ import {
   type CheckEntry,
   type PrAuthor,
   type PrDetails,
+  type PrFile,
   type PullRequestRef,
   type TimelineEntry,
 } from '@/lib/api'
@@ -36,33 +38,48 @@ type State =
   | { status: 'ready'; data: PrDetails }
   | { status: 'error'; message: string }
 
+type FilesState =
+  | { status: 'loading' }
+  | { status: 'ready'; files: PrFile[] }
+  | { status: 'error'; message: string }
+
 type Props = {
   pr: PullRequestRef
   onBack: () => void
 }
 
 type MergeMethod = 'MERGE' | 'SQUASH' | 'REBASE'
+type Tab = 'conversation' | 'files'
 
 export function PrViewer({ pr, onBack }: Props) {
   const [state, setState] = useState<State>({ status: 'loading' })
+  const [filesState, setFilesState] = useState<FilesState>({ status: 'loading' })
   const [refreshing, setRefreshing] = useState(false)
   const [merging, setMerging] = useState(false)
   const [mergeError, setMergeError] = useState<string | null>(null)
+  const [tab, setTab] = useState<Tab>('conversation')
 
   const [owner, name] = pr.repo.split('/')
 
   const load = useCallback(
     async (silent = false) => {
-      if (!silent) setState({ status: 'loading' })
-      setRefreshing(true)
-      try {
-        const data = await api.getPrDetails(owner, name, pr.number)
-        setState({ status: 'ready', data })
-      } catch (err) {
-        setState({ status: 'error', message: String(err) })
-      } finally {
-        setRefreshing(false)
+      if (!silent) {
+        setState({ status: 'loading' })
+        setFilesState({ status: 'loading' })
       }
+      setRefreshing(true)
+      const detailsPromise = api
+        .getPrDetails(owner, name, pr.number)
+        .then((data) => setState({ status: 'ready', data }))
+        .catch((err) => setState({ status: 'error', message: String(err) }))
+      const filesPromise = api
+        .getPrFiles(owner, name, pr.number)
+        .then((files) => setFilesState({ status: 'ready', files }))
+        .catch((err) =>
+          setFilesState({ status: 'error', message: String(err) }),
+        )
+      await Promise.all([detailsPromise, filesPromise])
+      setRefreshing(false)
     },
     [owner, name, pr.number],
   )
@@ -131,31 +148,59 @@ export function PrViewer({ pr, onBack }: Props) {
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto flex max-w-4xl flex-col gap-5">
-          {state.status === 'loading' && <PrViewerSkeleton />}
+      {state.status === 'ready' && (
+        <TabsNav
+          current={tab}
+          onChange={setTab}
+          timelineCount={state.data.timeline.length}
+          filesCount={state.data.changed_files}
+        />
+      )}
 
-          {state.status === 'error' && (
+      {state.status === 'loading' && (
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="mx-auto flex max-w-4xl flex-col gap-5">
+            <PrViewerSkeleton />
+          </div>
+        </div>
+      )}
+
+      {state.status === 'error' && (
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="mx-auto max-w-4xl">
             <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {state.message}
             </div>
-          )}
+          </div>
+        </div>
+      )}
 
-          {state.status === 'ready' && (
-            <PrBody
+      {state.status === 'ready' && tab === 'conversation' && (
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="mx-auto flex max-w-4xl flex-col gap-5">
+            <ConversationContent
               data={state.data}
               merging={merging}
               mergeError={mergeError}
               onMerge={(method) => doMerge(state.data.node_id, method)}
             />
-          )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {state.status === 'ready' && tab === 'files' && (
+        <FilesPane
+          prKey={`${pr.repo}#${pr.number}`}
+          filesState={filesState}
+          additions={state.data.additions}
+          deletions={state.data.deletions}
+        />
+      )}
     </div>
   )
 }
 
-function PrBody({
+function ConversationContent({
   data,
   merging,
   mergeError,
@@ -218,7 +263,9 @@ function PrBody({
         <Stat label="Linhas removidas" value={`-${data.deletions}`} accent="del" />
       </section>
 
-      {(data.labels.length > 0 || data.assignees.length > 0 || reviewers.length > 0) && (
+      {(data.labels.length > 0 ||
+        data.assignees.length > 0 ||
+        reviewers.length > 0) && (
         <section className="flex flex-col gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
           {data.labels.length > 0 && (
             <MetaRow label="Labels">
@@ -286,6 +333,84 @@ function PrBody({
         )}
       </section>
     </>
+  )
+}
+
+function TabsNav({
+  current,
+  onChange,
+  timelineCount,
+  filesCount,
+}: {
+  current: Tab
+  onChange: (t: Tab) => void
+  timelineCount: number
+  filesCount: number
+}) {
+  const items: { key: Tab; label: string; count: number }[] = [
+    { key: 'conversation', label: 'Conversa', count: timelineCount },
+    { key: 'files', label: 'Arquivos', count: filesCount },
+  ]
+  return (
+    <div className="flex shrink-0 items-center gap-1 border-b border-border px-6">
+      {items.map((it) => {
+        const active = current === it.key
+        return (
+          <button
+            key={it.key}
+            type="button"
+            onClick={() => onChange(it.key)}
+            className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+              active
+                ? 'border-foreground text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {it.label}
+            <span className="tabular-nums text-muted-foreground/60">
+              {it.count}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function FilesPane({
+  prKey,
+  filesState,
+  additions,
+  deletions,
+}: {
+  prKey: string
+  filesState: FilesState
+  additions: number
+  deletions: number
+}) {
+  if (filesState.status === 'loading') {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <Skeleton className="h-[300px] rounded-xl bg-card" />
+      </div>
+    )
+  }
+  if (filesState.status === 'error') {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="rounded-md bg-destructive/10 px-4 py-3 text-xs text-destructive">
+          Não foi possível carregar os arquivos: {filesState.message}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <DiffViewer
+      prKey={prKey}
+      files={filesState.files}
+      additions={additions}
+      deletions={deletions}
+    />
   )
 }
 

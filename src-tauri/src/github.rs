@@ -53,6 +53,22 @@ pub struct PrAuthor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrFile {
+    pub sha: String,
+    pub filename: String,
+    pub status: String,
+    pub additions: i64,
+    pub deletions: i64,
+    pub changes: i64,
+    #[serde(default)]
+    pub blob_url: Option<String>,
+    #[serde(default)]
+    pub patch: Option<String>,
+    #[serde(default)]
+    pub previous_filename: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PullRequestRef {
     pub id: i64,
     pub number: i64,
@@ -215,6 +231,23 @@ impl Client {
     pub async fn list_user_orgs(&self) -> AppResult<Vec<OrgRef>> {
         let res = self
             .request(reqwest::Method::GET, "/user/orgs")
+            .query(&[("per_page", "100")])
+            .send()
+            .await?;
+        Ok(res.error_for_status()?.json().await?)
+    }
+
+    pub async fn list_pr_files(
+        &self,
+        owner: &str,
+        name: &str,
+        number: i64,
+    ) -> AppResult<Vec<PrFile>> {
+        let res = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/repos/{owner}/{name}/pulls/{number}/files"),
+            )
             .query(&[("per_page", "100")])
             .send()
             .await?;

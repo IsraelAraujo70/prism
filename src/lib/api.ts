@@ -148,6 +148,18 @@ export type CheckEntry = {
   description: string | null
 }
 
+export type PrFile = {
+  sha: string
+  filename: string
+  status: string
+  additions: number
+  deletions: number
+  changes: number
+  blob_url: string | null
+  patch: string | null
+  previous_filename: string | null
+}
+
 export type PrDetails = {
   id: number
   node_id: string
@@ -208,6 +220,9 @@ export const api = {
 
   getPrDetails: (owner: string, name: string, number: number) =>
     invoke<PrDetails>('get_pr_details', { owner, name, number }),
+
+  getPrFiles: (owner: string, name: string, number: number) =>
+    invoke<PrFile[]>('get_pr_files', { owner, name, number }),
 
   mergePullRequest: (prNodeId: string, method: 'MERGE' | 'SQUASH' | 'REBASE') =>
     invoke<void>('merge_pull_request', { prNodeId, method }),

@@ -3,7 +3,7 @@ use crate::db::{self, DbState, WatchedRepo};
 use crate::error::{AppError, AppResult};
 use crate::github::{
     self, Client, DeviceCodeResponse, DevicePollResult, GithubUser, OrgRef, PollOutcome,
-    PrAuthor, PullRequestRef, Repo,
+    PrAuthor, PrFile, PullRequestRef, Repo,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1049,6 +1049,16 @@ pub async fn merge_pull_request(
 
     let _: serde_json::Value = client.graphql(MERGE_MUTATION, variables).await?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_pr_files(
+    owner: String,
+    name: String,
+    number: i64,
+) -> AppResult<Vec<PrFile>> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    Client::new(token)?.list_pr_files(&owner, &name, number).await
 }
 
 // ── GitHub API ─────────────────────────────────────────
