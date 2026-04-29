@@ -32,6 +32,11 @@ import {
   type ReviewThread,
 } from '@/components/review-thread-card'
 import { api, type PrFile } from '@/lib/api'
+import {
+  getLanguageFromFilename,
+  useHighlightLine,
+  type HighlightLineFn,
+} from '@/lib/highlight'
 
 type ViewMode = 'unified' | 'split'
 
@@ -569,6 +574,7 @@ function FileBody({
   }
   return (
     <DiffContent
+      filename={file.filename}
       patch={file.patch}
       blobUrl={file.blob_url}
       viewMode={viewMode}
@@ -611,6 +617,7 @@ function ThreadList({
 }
 
 function DiffContent({
+  filename,
   patch,
   blobUrl,
   viewMode,
@@ -618,6 +625,7 @@ function DiffContent({
   threads,
   onAfterMutation,
 }: {
+  filename: string
   patch: string
   blobUrl: string | null
   viewMode: ViewMode
@@ -630,6 +638,9 @@ function DiffContent({
     () => hunks.reduce((n, h) => n + h.lines.length, 0),
     [hunks],
   )
+
+  const lang = useMemo(() => getLanguageFromFilename(filename), [filename])
+  const highlightLine = useHighlightLine(lang)
 
   const { lineThreads, orphaned } = useMemo(
     () => groupThreadsByLine(hunks, threads),
@@ -690,6 +701,7 @@ function DiffContent({
         <SplitDiff
           hunks={hunks}
           wrap={wrap}
+          highlightLine={highlightLine}
           lineThreads={lineThreads}
           onAfterMutation={onAfterMutation}
         />
@@ -697,6 +709,7 @@ function DiffContent({
         <UnifiedDiff
           hunks={hunks}
           wrap={wrap}
+          highlightLine={highlightLine}
           lineThreads={lineThreads}
           onAfterMutation={onAfterMutation}
         />
@@ -747,11 +760,13 @@ function lineMatchesThread(line: DiffLine, t: ReviewThread): boolean {
 function UnifiedDiff({
   hunks,
   wrap,
+  highlightLine,
   lineThreads,
   onAfterMutation,
 }: {
   hunks: Hunk[]
   wrap: boolean
+  highlightLine: HighlightLineFn
   lineThreads: Map<DiffLine, ReviewThread[]>
   onAfterMutation: () => Promise<void>
 }) {
@@ -778,7 +793,11 @@ function UnifiedDiff({
                 const ts = lineThreads.get(line)
                 return (
                   <Fragment key={j}>
-                    <UnifiedRow line={line} wrap={wrap} />
+                    <UnifiedRow
+                      line={line}
+                      wrap={wrap}
+                      highlightLine={highlightLine}
+                    />
                     {ts && ts.length > 0 && (
                       <tr>
                         <td
@@ -804,7 +823,15 @@ function UnifiedDiff({
   )
 }
 
-function UnifiedRow({ line, wrap }: { line: DiffLine; wrap: boolean }) {
+function UnifiedRow({
+  line,
+  wrap,
+  highlightLine,
+}: {
+  line: DiffLine
+  wrap: boolean
+  highlightLine: HighlightLineFn
+}) {
   const tone =
     line.kind === 'add'
       ? 'bg-emerald-500/10'
@@ -832,7 +859,7 @@ function UnifiedRow({ line, wrap }: { line: DiffLine; wrap: boolean }) {
       </td>
       <td className={`${wrapClass} px-3 text-foreground/90`}>
         <span className={`mr-2 select-none ${signTone}`}>{sign}</span>
-        {line.text}
+        <HighlightedText text={line.text} highlightLine={highlightLine} />
       </td>
     </tr>
   )
@@ -841,11 +868,13 @@ function UnifiedRow({ line, wrap }: { line: DiffLine; wrap: boolean }) {
 function SplitDiff({
   hunks,
   wrap,
+  highlightLine,
   lineThreads,
   onAfterMutation,
 }: {
   hunks: Hunk[]
   wrap: boolean
+  highlightLine: HighlightLineFn
   lineThreads: Map<DiffLine, ReviewThread[]>
   onAfterMutation: () => Promise<void>
 }) {
@@ -889,7 +918,11 @@ function SplitDiff({
                 }
                 return (
                   <Fragment key={j}>
-                    <SplitRow row={row} wrap={wrap} />
+                    <SplitRow
+                      row={row}
+                      wrap={wrap}
+                      highlightLine={highlightLine}
+                    />
                     {collected.length > 0 && (
                       <tr>
                         <td
@@ -946,11 +979,29 @@ function pairLines(lines: DiffLine[]): SbsRow[] {
   return rows
 }
 
-function SplitRow({ row, wrap }: { row: SbsRow; wrap: boolean }) {
+function SplitRow({
+  row,
+  wrap,
+  highlightLine,
+}: {
+  row: SbsRow
+  wrap: boolean
+  highlightLine: HighlightLineFn
+}) {
   return (
     <tr>
-      <SplitCell line={row.left} side="left" wrap={wrap} />
-      <SplitCell line={row.right} side="right" wrap={wrap} />
+      <SplitCell
+        line={row.left}
+        side="left"
+        wrap={wrap}
+        highlightLine={highlightLine}
+      />
+      <SplitCell
+        line={row.right}
+        side="right"
+        wrap={wrap}
+        highlightLine={highlightLine}
+      />
     </tr>
   )
 }
@@ -959,10 +1010,12 @@ function SplitCell({
   line,
   side,
   wrap,
+  highlightLine,
 }: {
   line: DiffLine | null
   side: 'left' | 'right'
   wrap: boolean
+  highlightLine: HighlightLineFn
 }) {
   if (!line) {
     return (
@@ -1012,8 +1065,28 @@ function SplitCell({
       </td>
       <td className={`${wrapClass} px-3 align-top text-foreground/90 ${tone}`}>
         <span className={`mr-2 select-none ${signTone}`}>{sign}</span>
-        {line.text}
+        <HighlightedText text={line.text} highlightLine={highlightLine} />
       </td>
+    </>
+  )
+}
+
+function HighlightedText({
+  text,
+  highlightLine,
+}: {
+  text: string
+  highlightLine: HighlightLineFn
+}) {
+  const tokens = highlightLine(text)
+  if (!tokens) return <>{text}</>
+  return (
+    <>
+      {tokens.map((tok, i) => (
+        <span key={i} style={tok.color ? { color: tok.color } : undefined}>
+          {tok.content}
+        </span>
+      ))}
     </>
   )
 }
