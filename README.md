@@ -13,10 +13,22 @@ Prism is a lightweight, cross-platform desktop app (Windows / macOS / Linux) bui
 <p align="center">
   <img src="docs/screenshots/review.png" alt="PR review with markdown body and diff" width="900" />
 </p>
+<p align="center">
+  <img src="docs/screenshots/list_prs.png" alt="Per-repo PR list with author, age and comment counts" width="900" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/command-pallet.png" alt="Command palette — fuzzy search across repos and PRs with prefix filters" width="600" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/notifications.png" alt="Inbox with collapsible repo groups and deduped clusters" width="900" />
+</p>
 
 ## Highlights
 
-- **Inbox** — mirrors GitHub's notification API; mark-as-read syncs both ways.
+- **Inbox** — mirrors GitHub's notification API; mark-as-read syncs both ways. Identical notifications (e.g. the same flaky CI check firing six times) collapse into a single row with a `×N` badge; repo groups are collapsible and have a one-click "mark this repo as read".
+- **Per-repo PR list** — open a watched repo to see its open / closed / all PRs with author, age and comment counts; click through to the full review.
+- **Command palette** (`Ctrl/Cmd+K`) — fuzzy search across watched repos and PRs. Prefix filters (`repo:`, `pr:`) narrow scope; `repo:<name> pr:<term>` searches PRs only inside that repo.
+- **Sidebar with hover preview** — collapse the sidebar to a 56px rail; hovering an org avatar shows its watched repos in a hover card you can click through.
 - **System tray** — unread badge, pause notifications for 1h / 4h, "mark all read" without opening the app.
 - **Native push** — fires only on relevant reasons (review_requested, mention, comment, assign, state_change, ci_activity); skips first-sync and collapses bursts > 3.
 - **Drag-select review** — drag across diff lines (LEFT or RIGHT side) to comment on a range. Auto-creates the pending review on first comment; submit with Approve / Comment / Request Changes.
@@ -125,6 +137,7 @@ src/
 ## Status
 
 - ✅ Notifications, tray, drag-select review (v0.1.1)
+- ✅ Per-repo PR list, command palette, inbox dedupe + collapsible groups, sidebar org hover preview (v0.1.2)
 - ⏳ Deep-link from native notification body click (needs custom URI scheme)
 - ⏳ Edit / delete pending review comments before submit
 - ⏳ Code signing for macOS / Windows
