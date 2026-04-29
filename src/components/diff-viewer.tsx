@@ -15,6 +15,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Rows3,
+  WrapText,
   type LucideIcon,
 } from 'lucide-react'
 import {
@@ -45,6 +46,7 @@ type Props = {
 
 const VIEW_MODE_KEY = 'prism.diff-view-mode'
 const SIDEBAR_KEY = 'prism.diff-sidebar-collapsed'
+const WRAP_KEY = 'prism.diff-line-wrap'
 const viewedKey = (prKey: string) => `prism.pr-viewed.${prKey}`
 
 const MAX_LINES_PER_FILE = 1500
@@ -62,6 +64,7 @@ export function DiffViewer({
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() =>
     readSidebarCollapsed(),
   )
+  const [wrap, setWrap] = useState<boolean>(() => readWrap())
   const [viewed, setViewed] = useState<Record<string, string>>(() =>
     readViewed(prKey),
   )
@@ -89,6 +92,14 @@ export function DiffViewer({
       // ignore
     }
   }, [sidebarCollapsed])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WRAP_KEY, wrap ? '1' : '0')
+    } catch {
+      // ignore
+    }
+  }, [wrap])
 
   useEffect(() => {
     try {
@@ -229,6 +240,13 @@ export function DiffViewer({
             />
             <div className="mx-1 h-4 w-px bg-border" />
             <ToolbarToggle
+              active={wrap}
+              onClick={() => setWrap((v) => !v)}
+              icon={WrapText}
+              label="Wrap"
+            />
+            <div className="mx-1 h-4 w-px bg-border" />
+            <ToolbarToggle
               active={viewMode === 'unified'}
               onClick={() => setViewMode('unified')}
               icon={Rows3}
@@ -254,6 +272,7 @@ export function DiffViewer({
                   key={f.filename}
                   file={f}
                   viewMode={viewMode}
+                  wrap={wrap}
                   open={isOpen}
                   viewed={isViewed}
                   threads={fileThreads}
@@ -409,6 +428,7 @@ function ViewedCheckbox({
 function FileBlock({
   file,
   viewMode,
+  wrap,
   open,
   viewed,
   threads,
@@ -419,6 +439,7 @@ function FileBlock({
 }: {
   file: PrFile
   viewMode: ViewMode
+  wrap: boolean
   open: boolean
   viewed: boolean
   threads: ReviewThread[]
@@ -494,6 +515,7 @@ function FileBlock({
           <FileBody
             file={file}
             viewMode={viewMode}
+            wrap={wrap}
             threads={threads}
             onAfterMutation={onAfterMutation}
           />
@@ -506,11 +528,13 @@ function FileBlock({
 function FileBody({
   file,
   viewMode,
+  wrap,
   threads,
   onAfterMutation,
 }: {
   file: PrFile
   viewMode: ViewMode
+  wrap: boolean
   threads: ReviewThread[]
   onAfterMutation: () => Promise<void>
 }) {
@@ -548,6 +572,7 @@ function FileBody({
       patch={file.patch}
       blobUrl={file.blob_url}
       viewMode={viewMode}
+      wrap={wrap}
       threads={threads}
       onAfterMutation={onAfterMutation}
     />
@@ -589,12 +614,14 @@ function DiffContent({
   patch,
   blobUrl,
   viewMode,
+  wrap,
   threads,
   onAfterMutation,
 }: {
   patch: string
   blobUrl: string | null
   viewMode: ViewMode
+  wrap: boolean
   threads: ReviewThread[]
   onAfterMutation: () => Promise<void>
 }) {
@@ -662,12 +689,14 @@ function DiffContent({
       {viewMode === 'split' ? (
         <SplitDiff
           hunks={hunks}
+          wrap={wrap}
           lineThreads={lineThreads}
           onAfterMutation={onAfterMutation}
         />
       ) : (
         <UnifiedDiff
           hunks={hunks}
+          wrap={wrap}
           lineThreads={lineThreads}
           onAfterMutation={onAfterMutation}
         />
@@ -717,10 +746,12 @@ function lineMatchesThread(line: DiffLine, t: ReviewThread): boolean {
 
 function UnifiedDiff({
   hunks,
+  wrap,
   lineThreads,
   onAfterMutation,
 }: {
   hunks: Hunk[]
+  wrap: boolean
   lineThreads: Map<DiffLine, ReviewThread[]>
   onAfterMutation: () => Promise<void>
 }) {
@@ -747,7 +778,7 @@ function UnifiedDiff({
                 const ts = lineThreads.get(line)
                 return (
                   <Fragment key={j}>
-                    <UnifiedRow line={line} />
+                    <UnifiedRow line={line} wrap={wrap} />
                     {ts && ts.length > 0 && (
                       <tr>
                         <td
@@ -773,7 +804,7 @@ function UnifiedDiff({
   )
 }
 
-function UnifiedRow({ line }: { line: DiffLine }) {
+function UnifiedRow({ line, wrap }: { line: DiffLine; wrap: boolean }) {
   const tone =
     line.kind === 'add'
       ? 'bg-emerald-500/10'
@@ -789,16 +820,17 @@ function UnifiedRow({ line }: { line: DiffLine }) {
         : 'text-muted-foreground/40'
   const oldNum = line.kind === 'add' ? '' : line.old
   const newNum = line.kind === 'del' ? '' : line.new
+  const wrapClass = wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'
 
   return (
     <tr className={tone}>
-      <td className="w-12 select-none border-r border-border/40 px-2 text-right text-[11px] tabular-nums text-muted-foreground/50">
+      <td className="w-12 select-none border-r border-border/40 px-2 align-top text-right text-[11px] tabular-nums text-muted-foreground/50">
         {oldNum}
       </td>
-      <td className="w-12 select-none border-r border-border/40 px-2 text-right text-[11px] tabular-nums text-muted-foreground/50">
+      <td className="w-12 select-none border-r border-border/40 px-2 align-top text-right text-[11px] tabular-nums text-muted-foreground/50">
         {newNum}
       </td>
-      <td className="whitespace-pre px-3 text-foreground/90">
+      <td className={`${wrapClass} px-3 text-foreground/90`}>
         <span className={`mr-2 select-none ${signTone}`}>{sign}</span>
         {line.text}
       </td>
@@ -808,10 +840,12 @@ function UnifiedRow({ line }: { line: DiffLine }) {
 
 function SplitDiff({
   hunks,
+  wrap,
   lineThreads,
   onAfterMutation,
 }: {
   hunks: Hunk[]
+  wrap: boolean
   lineThreads: Map<DiffLine, ReviewThread[]>
   onAfterMutation: () => Promise<void>
 }) {
@@ -855,7 +889,7 @@ function SplitDiff({
                 }
                 return (
                   <Fragment key={j}>
-                    <SplitRow row={row} />
+                    <SplitRow row={row} wrap={wrap} />
                     {collected.length > 0 && (
                       <tr>
                         <td
@@ -912,11 +946,11 @@ function pairLines(lines: DiffLine[]): SbsRow[] {
   return rows
 }
 
-function SplitRow({ row }: { row: SbsRow }) {
+function SplitRow({ row, wrap }: { row: SbsRow; wrap: boolean }) {
   return (
     <tr>
-      <SplitCell line={row.left} side="left" />
-      <SplitCell line={row.right} side="right" />
+      <SplitCell line={row.left} side="left" wrap={wrap} />
+      <SplitCell line={row.right} side="right" wrap={wrap} />
     </tr>
   )
 }
@@ -924,9 +958,11 @@ function SplitRow({ row }: { row: SbsRow }) {
 function SplitCell({
   line,
   side,
+  wrap,
 }: {
   line: DiffLine | null
   side: 'left' | 'right'
+  wrap: boolean
 }) {
   if (!line) {
     return (
@@ -965,15 +1001,16 @@ function SplitCell({
     line.kind === 'context' ? (side === 'left' ? line.old : line.new)
     : line.kind === 'del' ? line.old
     : line.new
+  const wrapClass = wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'
 
   return (
     <>
       <td
-        className={`w-12 select-none border-r border-border/40 px-2 text-right text-[11px] tabular-nums text-muted-foreground/50 ${tone}`}
+        className={`w-12 select-none border-r border-border/40 px-2 align-top text-right text-[11px] tabular-nums text-muted-foreground/50 ${tone}`}
       >
         {num}
       </td>
-      <td className={`whitespace-pre px-3 text-foreground/90 ${tone}`}>
+      <td className={`${wrapClass} px-3 align-top text-foreground/90 ${tone}`}>
         <span className={`mr-2 select-none ${signTone}`}>{sign}</span>
         {line.text}
       </td>
@@ -1083,6 +1120,14 @@ function readViewMode(): ViewMode {
 function readSidebarCollapsed(): boolean {
   try {
     return localStorage.getItem(SIDEBAR_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function readWrap(): boolean {
+  try {
+    return localStorage.getItem(WRAP_KEY) === '1'
   } catch {
     return false
   }
