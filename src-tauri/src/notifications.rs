@@ -143,6 +143,23 @@ pub async fn mark_all_read(app: &AppHandle) -> AppResult<()> {
     Ok(())
 }
 
+pub async fn mark_repo_read(app: &AppHandle, repo_full: &str) -> AppResult<()> {
+    let (owner, repo) = repo_full
+        .split_once('/')
+        .ok_or_else(|| AppError::Other(format!("invalid repo_full: {repo_full}")))?;
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    client.mark_repo_notifications_read(owner, repo).await?;
+    {
+        let state = app.state::<DbState>();
+        let conn = state.0.lock().unwrap();
+        db::mark_repo_notifications_read(&conn, repo_full);
+    }
+    tray::update_title(app);
+    let _ = app.emit("notifications:changed", ());
+    Ok(())
+}
+
 pub fn spawn_loop(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut backoff = MIN_POLL_SECS;

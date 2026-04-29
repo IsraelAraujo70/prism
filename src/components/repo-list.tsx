@@ -9,6 +9,11 @@ import {
 
 import { AddRepoDialog } from '@/components/add-repo-dialog'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from '@/components/ui/hover-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, type WatchedRepo } from '@/lib/api'
 
@@ -114,25 +119,18 @@ export function RepoList({
 
   if (collapsed) {
     return (
-      <nav className="flex flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden py-3">
+      <nav className="flex flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden pt-1 pb-3">
         <AddRepoDialog watchedIds={watchedIds} onChanged={load} compact />
-        {settingsSlot && <div className="mb-1">{settingsSlot}</div>}
+        {settingsSlot}
         <div className="my-1 h-px w-6 bg-sidebar-border" />
         {state.status === 'ready' &&
           groups.map((group) => (
-            <button
+            <CollapsedOrg
               key={group.owner}
-              type="button"
-              title={`${group.owner} (${group.repos.length})`}
-              className="rounded-md p-1 transition-colors hover:bg-sidebar-accent"
-            >
-              <Avatar className="size-7 rounded-md">
-                <AvatarImage src={group.avatar} alt={group.owner} />
-                <AvatarFallback className="rounded-md bg-sidebar-accent text-[10px] font-semibold">
-                  {group.owner.slice(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-            </button>
+              group={group}
+              selectedId={selectedId}
+              onSelectRepo={onSelectRepo}
+            />
           ))}
       </nav>
     )
@@ -269,6 +267,91 @@ function OrgGroup({
         </div>
       )}
     </div>
+  )
+}
+
+function CollapsedOrg({
+  group,
+  selectedId,
+  onSelectRepo,
+}: {
+  group: Group
+  selectedId: number | null
+  onSelectRepo?: (repo: WatchedRepo) => void
+}) {
+  const hasSelected = group.repos.some((r) => r.id === selectedId)
+
+  return (
+    <HoverCard>
+      <HoverCardTrigger asChild>
+        <button
+          type="button"
+          aria-label={`${group.owner} (${group.repos.length})`}
+          className={`relative rounded-md p-1 transition-colors hover:bg-sidebar-accent ${
+            hasSelected ? 'bg-sidebar-accent' : ''
+          }`}
+        >
+          <Avatar className="size-7 rounded-md">
+            <AvatarImage src={group.avatar} alt={group.owner} />
+            <AvatarFallback className="rounded-md bg-sidebar-accent text-[10px] font-semibold">
+              {group.owner.slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent>
+        <div className="flex items-center gap-2 px-2 pt-1 pb-2">
+          <Avatar className="size-4 shrink-0 rounded-sm">
+            <AvatarImage src={group.avatar} alt={group.owner} />
+            <AvatarFallback className="rounded-sm bg-muted text-[9px] font-semibold">
+              {group.owner.slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <span className="flex-1 truncate text-sm font-medium">
+            {group.owner}
+          </span>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {group.repos.length}
+          </span>
+        </div>
+        <div className="-mx-2 mb-1 h-px bg-border/60" />
+        <div className="flex flex-col gap-0.5">
+          {group.repos.map((repo) => {
+            const active = repo.id === selectedId
+            return (
+              <button
+                key={repo.id}
+                type="button"
+                onClick={() => onSelectRepo?.(repo)}
+                className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
+                  active ? 'bg-accent' : 'hover:bg-accent'
+                }`}
+              >
+                <GitFork
+                  className={`size-3.5 shrink-0 transition-colors ${
+                    active
+                      ? 'text-foreground/70'
+                      : 'text-muted-foreground group-hover:text-foreground/70'
+                  }`}
+                />
+                <span
+                  className={`flex-1 truncate text-sm transition-colors ${
+                    active
+                      ? 'text-foreground'
+                      : 'text-foreground/80 group-hover:text-foreground'
+                  }`}
+                >
+                  {repo.name}
+                </span>
+                {repo.private && (
+                  <Lock className="size-3 shrink-0 text-muted-foreground/60" />
+                )}
+              </button>
+            )
+          })}
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   )
 }
 

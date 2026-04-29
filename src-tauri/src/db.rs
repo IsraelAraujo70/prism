@@ -252,6 +252,14 @@ pub fn mark_all_notifications_read(conn: &Connection) {
     conn.execute("UPDATE notifications SET unread = 0", []).unwrap();
 }
 
+pub fn mark_repo_notifications_read(conn: &Connection, repo_full: &str) {
+    conn.execute(
+        "UPDATE notifications SET unread = 0 WHERE repo_full = ?1",
+        params![repo_full],
+    )
+    .unwrap();
+}
+
 pub fn get_sync_state(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row(
         "SELECT value FROM sync_state WHERE key = ?1",

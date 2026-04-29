@@ -77,6 +77,15 @@ export type PullRequestRef = {
   updated_at: string
   comments: number
   draft: boolean
+  state?: string
+}
+
+export type RepoPrScope = 'open' | 'closed' | 'all'
+
+export type RepoPrPage = {
+  items: PullRequestRef[]
+  total: number
+  next_cursor: string | null
 }
 
 export type ContributorStat = {
@@ -242,6 +251,25 @@ export const api = {
   getDashboard: (repoFullName?: string | null) =>
     invoke<Dashboard>('get_dashboard', { repoFullName: repoFullName ?? null }),
 
+  listRepoPrs: (
+    owner: string,
+    name: string,
+    scope: RepoPrScope,
+    after?: string | null,
+  ) =>
+    invoke<RepoPrPage>('list_repo_prs', {
+      owner,
+      name,
+      scope,
+      after: after ?? null,
+    }),
+
+  searchPrs: (query: string) =>
+    invoke<PullRequestRef[]>('search_prs', { query }),
+
+  searchPrsInRepo: (owner: string, name: string, query: string) =>
+    invoke<PullRequestRef[]>('search_prs_in_repo', { owner, name, query }),
+
   getPrDetails: (owner: string, name: string, number: number) =>
     invoke<PrDetails>('get_pr_details', { owner, name, number }),
 
@@ -286,6 +314,8 @@ export const api = {
   markNotificationRead: (threadId: string) =>
     invoke<void>('mark_notification_read', { threadId }),
   markAllNotificationsRead: () => invoke<void>('mark_all_notifications_read'),
+  markRepoNotificationsRead: (repoFull: string) =>
+    invoke<void>('mark_repo_notifications_read', { repoFull }),
   syncNotificationsNow: () => invoke<void>('sync_notifications_now'),
 
   listNotificationMutes: () =>

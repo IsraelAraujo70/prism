@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.1.1"
+version = "0.1.2"
 description = "Desktop client for GitHub Pull Requests."
 authors = ["Israel Araujo de Oliveira"]
 license = "MIT"

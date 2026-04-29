@@ -284,6 +284,7 @@ fn pr_from_node(n: GqlPrNode) -> Option<PullRequestRef> {
         updated_at: n.updated_at?,
         comments: n.comments?.total_count,
         draft: n.is_draft.unwrap_or(false),
+        state: None,
     })
 }
 
@@ -1318,6 +1319,14 @@ pub async fn mark_all_notifications_read(app: tauri::AppHandle) -> AppResult<()>
 }
 
 #[tauri::command]
+pub async fn mark_repo_notifications_read(
+    repo_full: String,
+    app: tauri::AppHandle,
+) -> AppResult<()> {
+    notifications::mark_repo_read(&app, &repo_full).await
+}
+
+#[tauri::command]
 pub async fn sync_notifications_now(app: tauri::AppHandle) -> AppResult<()> {
     notifications::sync_once(&app).await.map(|_| ())
 }
@@ -1374,6 +1383,266 @@ pub async fn resume_notifications(app: tauri::AppHandle) -> AppResult<()> {
 #[tauri::command]
 pub async fn get_pause_status(app: tauri::AppHandle) -> AppResult<Option<i64>> {
     Ok(notifications::paused_until(&app))
+}
+
+// ── Repo PR list ───────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct RepoPrPage {
+    pub items: Vec<PullRequestRef>,
+    pub total: i64,
+    pub next_cursor: Option<String>,
+}
+
+const REPO_PRS_QUERY: &str = r#"
+query($owner: String!, $name: String!, $states: [PullRequestState!], $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(
+      first: 30
+      after: $after
+      states: $states
+      orderBy: {field: UPDATED_AT, direction: DESC}
+    ) {
+      totalCount
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        databaseId
+        number
+        title
+        url
+        updatedAt
+        isDraft
+        state
+        comments { totalCount }
+        author { login avatarUrl }
+        repository { nameWithOwner }
+      }
+    }
+  }
+}
+"#;
+
+#[derive(Deserialize)]
+struct RepoPrsData {
+    repository: Option<RepoPrsRepo>,
+}
+
+#[derive(Deserialize)]
+struct RepoPrsRepo {
+    #[serde(rename = "pullRequests")]
+    pull_requests: RepoPrsConnection,
+}
+
+#[derive(Deserialize)]
+struct RepoPrsConnection {
+    #[serde(rename = "totalCount")]
+    total_count: i64,
+    #[serde(rename = "pageInfo")]
+    page_info: RepoPrsPageInfo,
+    nodes: Vec<RepoPrNode>,
+}
+
+#[derive(Deserialize)]
+struct RepoPrsPageInfo {
+    #[serde(rename = "hasNextPage")]
+    has_next_page: bool,
+    #[serde(rename = "endCursor")]
+    end_cursor: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RepoPrNode {
+    #[serde(rename = "databaseId")]
+    database_id: Option<i64>,
+    number: Option<i64>,
+    title: Option<String>,
+    url: Option<String>,
+    #[serde(rename = "updatedAt")]
+    updated_at: Option<String>,
+    #[serde(rename = "isDraft")]
+    is_draft: Option<bool>,
+    state: Option<String>,
+    comments: Option<GqlComments>,
+    author: Option<GqlAuthor>,
+    repository: Option<GqlRepoRef>,
+}
+
+fn repo_pr_from_node(n: RepoPrNode) -> Option<PullRequestRef> {
+    let author = n.author?;
+    let repo = n.repository?;
+    Some(PullRequestRef {
+        id: n.database_id?,
+        number: n.number?,
+        title: n.title?,
+        html_url: n.url?,
+        repo: repo.name_with_owner,
+        author: PrAuthor {
+            login: author.login,
+            avatar_url: author.avatar_url,
+        },
+        updated_at: n.updated_at?,
+        comments: n.comments?.total_count,
+        draft: n.is_draft.unwrap_or(false),
+        state: n.state,
+    })
+}
+
+#[tauri::command]
+pub async fn list_repo_prs(
+    owner: String,
+    name: String,
+    scope: String,
+    after: Option<String>,
+) -> AppResult<RepoPrPage> {
+    let states: Option<Vec<&str>> = match scope.as_str() {
+        "open" => Some(vec!["OPEN"]),
+        "closed" => Some(vec!["CLOSED", "MERGED"]),
+        "all" => None,
+        other => {
+            return Err(AppError::InvalidToken(format!("scope inválido: {other}")));
+        }
+    };
+
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+
+    let variables = serde_json::json!({
+        "owner": owner,
+        "name": name,
+        "states": states,
+        "after": after,
+    });
+
+    let data: RepoPrsData = client.graphql(REPO_PRS_QUERY, variables).await?;
+    let repo = data
+        .repository
+        .ok_or_else(|| AppError::InvalidToken("repositório não encontrado".into()))?;
+
+    let items: Vec<PullRequestRef> = repo
+        .pull_requests
+        .nodes
+        .into_iter()
+        .filter_map(repo_pr_from_node)
+        .collect();
+
+    Ok(RepoPrPage {
+        items,
+        total: repo.pull_requests.total_count,
+        next_cursor: if repo.pull_requests.page_info.has_next_page {
+            repo.pull_requests.page_info.end_cursor
+        } else {
+            None
+        },
+    })
+}
+
+// ── PR search (command palette) ────────────────────────
+
+const PR_SEARCH_QUERY: &str = r#"
+query($q: String!) {
+  search(query: $q, type: ISSUE, first: 15) {
+    nodes {
+      ... on PullRequest {
+        databaseId
+        number
+        title
+        url
+        updatedAt
+        isDraft
+        state
+        comments { totalCount }
+        author { login avatarUrl }
+        repository { nameWithOwner }
+      }
+    }
+  }
+}
+"#;
+
+#[derive(Deserialize)]
+struct PrSearchData {
+    search: PrSearchConnection,
+}
+
+#[derive(Deserialize)]
+struct PrSearchConnection {
+    nodes: Vec<RepoPrNode>,
+}
+
+#[tauri::command]
+pub async fn search_prs(
+    query: String,
+    db: State<'_, DbState>,
+) -> AppResult<Vec<PullRequestRef>> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let repos = {
+        let conn = db.0.lock().unwrap();
+        db::list_watched(&conn)
+    };
+    if repos.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let repo_filter = repos
+        .iter()
+        .map(|r| format!("repo:{}", r.full_name))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+
+    let q = format!("is:pr {trimmed} {repo_filter}");
+    let variables = serde_json::json!({ "q": q });
+
+    let data: PrSearchData = client.graphql(PR_SEARCH_QUERY, variables).await?;
+    let items: Vec<PullRequestRef> = data
+        .search
+        .nodes
+        .into_iter()
+        .filter_map(repo_pr_from_node)
+        .collect();
+
+    Ok(items)
+}
+
+#[tauri::command]
+pub async fn search_prs_in_repo(
+    owner: String,
+    name: String,
+    query: String,
+) -> AppResult<Vec<PullRequestRef>> {
+    let trimmed_owner = owner.trim();
+    let trimmed_name = name.trim();
+    if trimmed_owner.is_empty() || trimmed_name.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+
+    let term = query.trim();
+    let q = if term.is_empty() {
+        format!("is:pr repo:{trimmed_owner}/{trimmed_name}")
+    } else {
+        format!("is:pr {term} repo:{trimmed_owner}/{trimmed_name}")
+    };
+    let variables = serde_json::json!({ "q": q });
+
+    let data: PrSearchData = client.graphql(PR_SEARCH_QUERY, variables).await?;
+    let items: Vec<PullRequestRef> = data
+        .search
+        .nodes
+        .into_iter()
+        .filter_map(repo_pr_from_node)
+        .collect();
+
+    Ok(items)
 }
 
 // ── GitHub API ─────────────────────────────────────────

@@ -11,6 +11,8 @@ pub enum AppError {
     Storage(#[from] std::io::Error),
     #[error("network: {0}")]
     Network(#[from] reqwest::Error),
+    #[error("{0}")]
+    Other(String),
 }
 
 impl Serialize for AppError {

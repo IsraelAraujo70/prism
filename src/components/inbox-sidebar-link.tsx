@@ -17,7 +17,7 @@ export function InboxSidebarLink({ collapsed, active, onClick }: Props) {
         type="button"
         onClick={onClick}
         title={unread > 0 ? `Caixa de entrada (${unread})` : 'Caixa de entrada'}
-        className={`group relative mx-auto my-1 flex size-9 items-center justify-center rounded-md transition-colors ${
+        className={`group relative mx-auto mt-1 flex size-9 items-center justify-center rounded-md transition-colors ${
           active
             ? 'bg-sidebar-accent text-sidebar-foreground'
             : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground'
