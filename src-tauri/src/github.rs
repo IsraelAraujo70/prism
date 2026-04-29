@@ -243,15 +243,25 @@ impl Client {
         name: &str,
         number: i64,
     ) -> AppResult<Vec<PrFile>> {
-        let res = self
-            .request(
-                reqwest::Method::GET,
-                &format!("/repos/{owner}/{name}/pulls/{number}/files"),
-            )
-            .query(&[("per_page", "100")])
-            .send()
-            .await?;
-        Ok(res.error_for_status()?.json().await?)
+        const PER_PAGE: usize = 100;
+        const MAX_PAGES: u32 = 30;
+        let path = format!("/repos/{owner}/{name}/pulls/{number}/files");
+        let mut all: Vec<PrFile> = Vec::new();
+        for page in 1..=MAX_PAGES {
+            let page_s = page.to_string();
+            let res = self
+                .request(reqwest::Method::GET, &path)
+                .query(&[("per_page", "100"), ("page", page_s.as_str())])
+                .send()
+                .await?;
+            let chunk: Vec<PrFile> = res.error_for_status()?.json().await?;
+            let len = chunk.len();
+            all.extend(chunk);
+            if len < PER_PAGE {
+                break;
+            }
+        }
+        Ok(all)
     }
 
     pub async fn list_org_repos(&self, org: &str) -> AppResult<Vec<Repo>> {

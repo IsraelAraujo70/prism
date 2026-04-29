@@ -961,18 +961,24 @@ pub async fn get_pr_details(
                         state,
                         target_url,
                         description,
-                    } => CheckEntry {
-                        name: context,
-                        status: "COMPLETED".into(),
-                        conclusion: Some(state),
-                        url: target_url,
-                        started_at: None,
-                        completed_at: None,
-                        app_name: None,
-                        app_logo_url: None,
-                        workflow_name: None,
-                        description,
-                    },
+                    } => {
+                        let (status, conclusion) = match state.as_str() {
+                            "PENDING" | "EXPECTED" => ("PENDING".to_string(), None),
+                            _ => ("COMPLETED".to_string(), Some(state)),
+                        };
+                        CheckEntry {
+                            name: context,
+                            status,
+                            conclusion,
+                            url: target_url,
+                            started_at: None,
+                            completed_at: None,
+                            app_name: None,
+                            app_logo_url: None,
+                            workflow_name: None,
+                            description,
+                        }
+                    }
                 })
                 .collect();
             (Some(r.state), entries)
