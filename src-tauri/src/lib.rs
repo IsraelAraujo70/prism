@@ -10,6 +10,14 @@ use std::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // WebKitGTK on Wayland (KDE Plasma, GNOME Wayland session) crashes with
+  // "Error 71 (Protocol error) dispatching to Wayland display" without this.
+  #[cfg(target_os = "linux")]
+  // SAFETY: set before any thread or webview is created.
+  unsafe {
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+  }
+
   let conn = db::init();
 
   tauri::Builder::default()
