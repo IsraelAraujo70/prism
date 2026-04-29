@@ -7,13 +7,11 @@
 
 Prism is a lightweight, cross-platform desktop app (Windows / macOS / Linux) built with [Tauri](https://tauri.app), focused on cutting the friction out of GitHub code review. It consolidates PRs across multiple repos and orgs, surfaces CI status, and fires native OS notifications only for the events that need your attention.
 
-<!-- TODO: replace with real screenshots once captured -->
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="800" />
+  <img src="docs/screenshots/dashboard.png" alt="Prism dashboard — PR stats, review queue, contributors" width="900" />
 </p>
 <p align="center">
-  <img src="docs/screenshots/inbox.png" alt="Inbox" width="800" />
-  <img src="docs/screenshots/review.png" alt="Drag-select review" width="800" />
+  <img src="docs/screenshots/review.png" alt="PR review with markdown body and diff" width="900" />
 </p>
 
 ## Highlights
