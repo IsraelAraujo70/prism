@@ -11,6 +11,7 @@ import {
   FilePen,
   FilePlus,
   FileSymlink,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Rows3,
@@ -25,6 +26,10 @@ import {
   useState,
 } from 'react'
 
+import {
+  ReviewThreadCard,
+  type ReviewThread,
+} from '@/components/review-thread-card'
 import { api, type PrFile } from '@/lib/api'
 
 type ViewMode = 'unified' | 'split'
@@ -34,6 +39,8 @@ type Props = {
   files: PrFile[]
   additions: number
   deletions: number
+  threads: ReviewThread[]
+  onAfterMutation: () => Promise<void>
 }
 
 const VIEW_MODE_KEY = 'prism.diff-view-mode'
@@ -43,7 +50,14 @@ const viewedKey = (prKey: string) => `prism.pr-viewed.${prKey}`
 const MAX_LINES_PER_FILE = 1500
 const SMALL_FILE_THRESHOLD = 80
 
-export function DiffViewer({ prKey, files, additions, deletions }: Props) {
+export function DiffViewer({
+  prKey,
+  files,
+  additions,
+  deletions,
+  threads,
+  onAfterMutation,
+}: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>(() => readViewMode())
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() =>
     readSidebarCollapsed(),
@@ -234,6 +248,7 @@ export function DiffViewer({ prKey, files, additions, deletions }: Props) {
             {files.map((f) => {
               const isViewed = viewed[f.filename] === f.sha
               const isOpen = openMap[f.filename] ?? false
+              const fileThreads = threads.filter((t) => t.path === f.filename)
               return (
                 <FileBlock
                   key={f.filename}
@@ -241,6 +256,8 @@ export function DiffViewer({ prKey, files, additions, deletions }: Props) {
                   viewMode={viewMode}
                   open={isOpen}
                   viewed={isViewed}
+                  threads={fileThreads}
+                  onAfterMutation={onAfterMutation}
                   onToggleOpen={() => setOpen(f.filename, !isOpen)}
                   onToggleViewed={() => toggleViewed(f)}
                   setRef={(el) => setFileRef(f.filename, el)}
@@ -394,6 +411,8 @@ function FileBlock({
   viewMode,
   open,
   viewed,
+  threads,
+  onAfterMutation,
   onToggleOpen,
   onToggleViewed,
   setRef,
@@ -402,6 +421,8 @@ function FileBlock({
   viewMode: ViewMode
   open: boolean
   viewed: boolean
+  threads: ReviewThread[]
+  onAfterMutation: () => Promise<void>
   onToggleOpen: () => void
   onToggleViewed: () => void
   setRef: (el: HTMLLIElement | null) => void
@@ -438,6 +459,15 @@ function FileBlock({
         >
           {displayName}
         </span>
+        {threads.length > 0 && (
+          <span
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            title={`${threads.length} comentário(s)`}
+          >
+            <MessageSquare className="size-3" />
+            {threads.length}
+          </span>
+        )}
         <span className="inline-flex shrink-0 items-center gap-2 text-[11px] tabular-nums">
           {file.additions > 0 && (
             <span className="text-emerald-400">+{file.additions}</span>
@@ -461,30 +491,54 @@ function FileBlock({
       </header>
       {open && (
         <div className="border-t border-border">
-          <FileBody file={file} viewMode={viewMode} />
+          <FileBody
+            file={file}
+            viewMode={viewMode}
+            threads={threads}
+            onAfterMutation={onAfterMutation}
+          />
         </div>
       )}
     </li>
   )
 }
 
-function FileBody({ file, viewMode }: { file: PrFile; viewMode: ViewMode }) {
+function FileBody({
+  file,
+  viewMode,
+  threads,
+  onAfterMutation,
+}: {
+  file: PrFile
+  viewMode: ViewMode
+  threads: ReviewThread[]
+  onAfterMutation: () => Promise<void>
+}) {
   if (!file.patch) {
     return (
-      <div className="px-4 py-3 text-xs text-muted-foreground">
-        {file.status === 'renamed'
-          ? 'Arquivo renomeado sem mudanças de conteúdo.'
-          : file.changes === 0
-            ? 'Sem mudanças textuais.'
-            : 'Sem patch disponível (provavelmente binário ou muito grande). '}
-        {file.blob_url && (
-          <button
-            type="button"
-            onClick={() => api.openUrl(file.blob_url as string)}
-            className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
-          >
-            Ver no GitHub <ExternalLink className="size-3" />
-          </button>
+      <div className="flex flex-col gap-3 px-4 py-3">
+        <p className="text-xs text-muted-foreground">
+          {file.status === 'renamed'
+            ? 'Arquivo renomeado sem mudanças de conteúdo.'
+            : file.changes === 0
+              ? 'Sem mudanças textuais.'
+              : 'Sem patch disponível (provavelmente binário ou muito grande). '}
+          {file.blob_url && (
+            <button
+              type="button"
+              onClick={() => api.openUrl(file.blob_url as string)}
+              className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Ver no GitHub <ExternalLink className="size-3" />
+            </button>
+          )}
+        </p>
+        {threads.length > 0 && (
+          <ThreadList
+            threads={threads}
+            onAfterMutation={onAfterMutation}
+            showFile={false}
+          />
         )}
       </div>
     )
@@ -494,7 +548,40 @@ function FileBody({ file, viewMode }: { file: PrFile; viewMode: ViewMode }) {
       patch={file.patch}
       blobUrl={file.blob_url}
       viewMode={viewMode}
+      threads={threads}
+      onAfterMutation={onAfterMutation}
     />
+  )
+}
+
+function ThreadList({
+  threads,
+  onAfterMutation,
+  showFile,
+}: {
+  threads: ReviewThread[]
+  onAfterMutation: () => Promise<void>
+  showFile?: boolean
+}) {
+  return (
+    <ul className="flex flex-col gap-3">
+      {threads.map((t) => (
+        <ReviewThreadCard
+          key={t.id}
+          thread={t}
+          showFile={showFile}
+          onReply={async (body) => {
+            await api.addReviewThreadReply(t.id, body)
+            await onAfterMutation()
+          }}
+          onResolveToggle={async () => {
+            if (t.is_resolved) await api.unresolveReviewThread(t.id)
+            else await api.resolveReviewThread(t.id)
+            await onAfterMutation()
+          }}
+        />
+      ))}
+    </ul>
   )
 }
 
@@ -502,10 +589,14 @@ function DiffContent({
   patch,
   blobUrl,
   viewMode,
+  threads,
+  onAfterMutation,
 }: {
   patch: string
   blobUrl: string | null
   viewMode: ViewMode
+  threads: ReviewThread[]
+  onAfterMutation: () => Promise<void>
 }) {
   const hunks = useMemo(() => parseDiff(patch), [patch])
   const totalLines = useMemo(
@@ -513,39 +604,126 @@ function DiffContent({
     [hunks],
   )
 
+  const { lineThreads, orphaned } = useMemo(
+    () => groupThreadsByLine(hunks, threads),
+    [hunks, threads],
+  )
+
   if (totalLines === 0) {
     return (
-      <p className="px-4 py-3 text-xs text-muted-foreground">Diff vazio.</p>
-    )
-  }
-
-  if (totalLines > MAX_LINES_PER_FILE) {
-    return (
-      <div className="px-4 py-3 text-xs text-muted-foreground">
-        Diff muito grande pra renderizar aqui ({totalLines} linhas).
-        {blobUrl && (
-          <>
-            {' '}
-            <button
-              type="button"
-              onClick={() => api.openUrl(blobUrl)}
-              className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
-            >
-              Abrir no GitHub <ExternalLink className="size-3" />
-            </button>
-          </>
+      <div className="flex flex-col gap-3">
+        <p className="px-4 py-3 text-xs text-muted-foreground">Diff vazio.</p>
+        {threads.length > 0 && (
+          <div className="px-4 pb-3">
+            <ThreadList
+              threads={threads}
+              onAfterMutation={onAfterMutation}
+              showFile={false}
+            />
+          </div>
         )}
       </div>
     )
   }
 
-  if (viewMode === 'split') {
-    return <SplitDiff hunks={hunks} />
+  if (totalLines > MAX_LINES_PER_FILE) {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="px-4 py-3 text-xs text-muted-foreground">
+          Diff muito grande pra renderizar aqui ({totalLines} linhas).
+          {blobUrl && (
+            <>
+              {' '}
+              <button
+                type="button"
+                onClick={() => api.openUrl(blobUrl)}
+                className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Abrir no GitHub <ExternalLink className="size-3" />
+              </button>
+            </>
+          )}
+        </div>
+        {threads.length > 0 && (
+          <div className="px-4 pb-3">
+            <ThreadList
+              threads={threads}
+              onAfterMutation={onAfterMutation}
+              showFile={false}
+            />
+          </div>
+        )}
+      </div>
+    )
   }
-  return <UnifiedDiff hunks={hunks} />
+
+  return (
+    <>
+      {viewMode === 'split' ? (
+        <SplitDiff
+          hunks={hunks}
+          lineThreads={lineThreads}
+          onAfterMutation={onAfterMutation}
+        />
+      ) : (
+        <UnifiedDiff
+          hunks={hunks}
+          lineThreads={lineThreads}
+          onAfterMutation={onAfterMutation}
+        />
+      )}
+      {orphaned.length > 0 && (
+        <div className="border-t border-border/60 px-4 py-3">
+          <p className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+            Comentários fora do diff atual
+          </p>
+          <ThreadList
+            threads={orphaned}
+            onAfterMutation={onAfterMutation}
+            showFile={false}
+          />
+        </div>
+      )}
+    </>
+  )
 }
 
-function UnifiedDiff({ hunks }: { hunks: Hunk[] }) {
+function groupThreadsByLine(
+  hunks: Hunk[],
+  threads: ReviewThread[],
+): { lineThreads: Map<DiffLine, ReviewThread[]>; orphaned: ReviewThread[] } {
+  const map = new Map<DiffLine, ReviewThread[]>()
+  const matched = new Set<string>()
+  for (const h of hunks) {
+    for (const line of h.lines) {
+      const here = threads.filter(
+        (t) => !matched.has(t.id) && lineMatchesThread(line, t),
+      )
+      if (here.length > 0) {
+        map.set(line, here)
+        for (const t of here) matched.add(t.id)
+      }
+    }
+  }
+  const orphaned = threads.filter((t) => !matched.has(t.id))
+  return { lineThreads: map, orphaned }
+}
+
+function lineMatchesThread(line: DiffLine, t: ReviewThread): boolean {
+  if (t.line == null) return false
+  if (line.kind === 'del') return line.old === t.line
+  return line.new === t.line
+}
+
+function UnifiedDiff({
+  hunks,
+  lineThreads,
+  onAfterMutation,
+}: {
+  hunks: Hunk[]
+  lineThreads: Map<DiffLine, ReviewThread[]>
+  onAfterMutation: () => Promise<void>
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse font-mono text-[12px] leading-5">
@@ -565,9 +743,28 @@ function UnifiedDiff({ hunks }: { hunks: Hunk[] }) {
                   )}
                 </td>
               </tr>
-              {h.lines.map((line, j) => (
-                <UnifiedRow key={j} line={line} />
-              ))}
+              {h.lines.map((line, j) => {
+                const ts = lineThreads.get(line)
+                return (
+                  <Fragment key={j}>
+                    <UnifiedRow line={line} />
+                    {ts && ts.length > 0 && (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="border-y border-border/60 bg-background/40 px-4 py-3 font-sans"
+                        >
+                          <ThreadList
+                            threads={ts}
+                            onAfterMutation={onAfterMutation}
+                            showFile={false}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </Fragment>
           ))}
         </tbody>
@@ -609,7 +806,15 @@ function UnifiedRow({ line }: { line: DiffLine }) {
   )
 }
 
-function SplitDiff({ hunks }: { hunks: Hunk[] }) {
+function SplitDiff({
+  hunks,
+  lineThreads,
+  onAfterMutation,
+}: {
+  hunks: Hunk[]
+  lineThreads: Map<DiffLine, ReviewThread[]>
+  onAfterMutation: () => Promise<void>
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full table-fixed border-collapse font-mono text-[12px] leading-5">
@@ -635,9 +840,39 @@ function SplitDiff({ hunks }: { hunks: Hunk[] }) {
                   )}
                 </td>
               </tr>
-              {pairLines(h.lines).map((row, j) => (
-                <SplitRow key={j} row={row} />
-              ))}
+              {pairLines(h.lines).map((row, j) => {
+                const seen = new Set<string>()
+                const collected: ReviewThread[] = []
+                for (const side of [row.left, row.right]) {
+                  if (!side) continue
+                  const ts = lineThreads.get(side)
+                  if (!ts) continue
+                  for (const t of ts) {
+                    if (seen.has(t.id)) continue
+                    seen.add(t.id)
+                    collected.push(t)
+                  }
+                }
+                return (
+                  <Fragment key={j}>
+                    <SplitRow row={row} />
+                    {collected.length > 0 && (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="border-y border-border/60 bg-background/40 px-4 py-3 font-sans"
+                        >
+                          <ThreadList
+                            threads={collected}
+                            onAfterMutation={onAfterMutation}
+                            showFile={false}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </Fragment>
           ))}
         </tbody>

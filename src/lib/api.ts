@@ -127,6 +127,7 @@ export type TimelineEntry =
     }
   | {
       kind: 'review_thread'
+      id: string
       path: string
       line: number | null
       is_resolved: boolean
@@ -226,4 +227,11 @@ export const api = {
 
   mergePullRequest: (prNodeId: string, method: 'MERGE' | 'SQUASH' | 'REBASE') =>
     invoke<void>('merge_pull_request', { prNodeId, method }),
+
+  addReviewThreadReply: (threadId: string, body: string) =>
+    invoke<void>('add_review_thread_reply', { threadId, body }),
+  resolveReviewThread: (threadId: string) =>
+    invoke<void>('resolve_review_thread', { threadId }),
+  unresolveReviewThread: (threadId: string) =>
+    invoke<void>('unresolve_review_thread', { threadId }),
 }

@@ -185,6 +185,7 @@ export function PrViewer({ pr, onBack }: Props) {
               merging={merging}
               mergeError={mergeError}
               onMerge={(method) => doMerge(state.data.node_id, method)}
+              onAfterMutation={() => load(true)}
             />
           </div>
         </div>
@@ -196,6 +197,11 @@ export function PrViewer({ pr, onBack }: Props) {
           filesState={filesState}
           additions={state.data.additions}
           deletions={state.data.deletions}
+          threads={state.data.timeline.filter(
+            (t): t is Extract<TimelineEntry, { kind: 'review_thread' }> =>
+              t.kind === 'review_thread',
+          )}
+          onAfterMutation={() => load(true)}
         />
       )}
     </div>
@@ -207,11 +213,13 @@ function ConversationContent({
   merging,
   mergeError,
   onMerge,
+  onAfterMutation,
 }: {
   data: PrDetails
   merging: boolean
   mergeError: string | null
   onMerge: (method: MergeMethod) => void
+  onAfterMutation: () => Promise<void>
 }) {
   const status = resolveStatus(data)
   const reviewers = mergeReviewers(data)
@@ -329,7 +337,11 @@ function ConversationContent({
         ) : (
           <ol className="flex flex-col gap-3">
             {data.timeline.map((entry, i) => (
-              <TimelineItem key={i} entry={entry} />
+              <TimelineItem
+                key={i}
+                entry={entry}
+                onAfterMutation={onAfterMutation}
+              />
             ))}
           </ol>
         )}
@@ -384,11 +396,15 @@ function FilesPane({
   filesState,
   additions,
   deletions,
+  threads,
+  onAfterMutation,
 }: {
   prKey: string
   filesState: FilesState
   additions: number
   deletions: number
+  threads: Extract<TimelineEntry, { kind: 'review_thread' }>[]
+  onAfterMutation: () => Promise<void>
 }) {
   if (filesState.status === 'loading') {
     return (
@@ -412,6 +428,8 @@ function FilesPane({
       files={filesState.files}
       additions={additions}
       deletions={deletions}
+      threads={threads}
+      onAfterMutation={onAfterMutation}
     />
   )
 }
@@ -932,9 +950,28 @@ const REVIEW_ACTION: Record<
   },
 }
 
-function TimelineItem({ entry }: { entry: TimelineEntry }) {
+function TimelineItem({
+  entry,
+  onAfterMutation,
+}: {
+  entry: TimelineEntry
+  onAfterMutation: () => Promise<void>
+}) {
   if (entry.kind === 'review_thread') {
-    return <ReviewThreadCard thread={entry} />
+    return (
+      <ReviewThreadCard
+        thread={entry}
+        onReply={async (body) => {
+          await api.addReviewThreadReply(entry.id, body)
+          await onAfterMutation()
+        }}
+        onResolveToggle={async () => {
+          if (entry.is_resolved) await api.unresolveReviewThread(entry.id)
+          else await api.resolveReviewThread(entry.id)
+          await onAfterMutation()
+        }}
+      />
+    )
   }
   if (entry.kind === 'comment') {
     return (

@@ -421,6 +421,7 @@ pub enum TimelineEntry {
         submitted_at: String,
     },
     ReviewThread {
+        id: String,
         path: String,
         line: Option<i64>,
         is_resolved: bool,
@@ -526,6 +527,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       }
       reviewThreads(first: 50) {
         nodes {
+          id
           path
           line
           originalLine
@@ -645,6 +647,7 @@ struct GqlThreadConnection {
 
 #[derive(Deserialize)]
 struct GqlThreadNode {
+    id: String,
     path: String,
     line: Option<i64>,
     #[serde(rename = "originalLine")]
@@ -903,6 +906,7 @@ pub async fn get_pr_details(
             .map(|c| c.created_at.clone())
             .unwrap_or_default();
         timeline.push(TimelineEntry::ReviewThread {
+            id: t.id,
             path: t.path,
             line: t.line.or(t.original_line),
             is_resolved: t.is_resolved,
@@ -1054,6 +1058,69 @@ pub async fn merge_pull_request(
     });
 
     let _: serde_json::Value = client.graphql(MERGE_MUTATION, variables).await?;
+    Ok(())
+}
+
+const ADD_THREAD_REPLY_MUTATION: &str = r#"
+mutation($input: AddPullRequestReviewThreadReplyInput!) {
+  addPullRequestReviewThreadReply(input: $input) {
+    comment { id }
+  }
+}
+"#;
+
+#[tauri::command]
+pub async fn add_review_thread_reply(
+    thread_id: String,
+    body: String,
+) -> AppResult<()> {
+    let body = body.trim().to_string();
+    if body.is_empty() {
+        return Err(AppError::InvalidToken("comentário vazio".into()));
+    }
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    let variables = serde_json::json!({
+        "input": {
+            "pullRequestReviewThreadId": thread_id,
+            "body": body,
+        }
+    });
+    let _: serde_json::Value = client.graphql(ADD_THREAD_REPLY_MUTATION, variables).await?;
+    Ok(())
+}
+
+const RESOLVE_THREAD_MUTATION: &str = r#"
+mutation($input: ResolveReviewThreadInput!) {
+  resolveReviewThread(input: $input) {
+    thread { id isResolved }
+  }
+}
+"#;
+
+const UNRESOLVE_THREAD_MUTATION: &str = r#"
+mutation($input: UnresolveReviewThreadInput!) {
+  unresolveReviewThread(input: $input) {
+    thread { id isResolved }
+  }
+}
+"#;
+
+#[tauri::command]
+pub async fn resolve_review_thread(thread_id: String) -> AppResult<()> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    let variables = serde_json::json!({ "input": { "threadId": thread_id } });
+    let _: serde_json::Value = client.graphql(RESOLVE_THREAD_MUTATION, variables).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn unresolve_review_thread(thread_id: String) -> AppResult<()> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    let variables = serde_json::json!({ "input": { "threadId": thread_id } });
+    let _: serde_json::Value = client.graphql(UNRESOLVE_THREAD_MUTATION, variables).await?;
     Ok(())
 }
 
