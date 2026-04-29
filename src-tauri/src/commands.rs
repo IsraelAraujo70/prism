@@ -1319,6 +1319,14 @@ pub async fn mark_all_notifications_read(app: tauri::AppHandle) -> AppResult<()>
 }
 
 #[tauri::command]
+pub async fn mark_repo_notifications_read(
+    repo_full: String,
+    app: tauri::AppHandle,
+) -> AppResult<()> {
+    notifications::mark_repo_read(&app, &repo_full).await
+}
+
+#[tauri::command]
 pub async fn sync_notifications_now(app: tauri::AppHandle) -> AppResult<()> {
     notifications::sync_once(&app).await.map(|_| ())
 }

@@ -314,6 +314,8 @@ export const api = {
   markNotificationRead: (threadId: string) =>
     invoke<void>('mark_notification_read', { threadId }),
   markAllNotificationsRead: () => invoke<void>('mark_all_notifications_read'),
+  markRepoNotificationsRead: (repoFull: string) =>
+    invoke<void>('mark_repo_notifications_read', { repoFull }),
   syncNotificationsNow: () => invoke<void>('sync_notifications_now'),
 
   listNotificationMutes: () =>

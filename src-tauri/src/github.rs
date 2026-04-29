@@ -384,6 +384,28 @@ impl Client {
         Ok(())
     }
 
+    pub async fn mark_repo_notifications_read(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> AppResult<()> {
+        let res = self
+            .request(
+                reqwest::Method::PUT,
+                &format!("/repos/{owner}/{repo}/notifications"),
+            )
+            .json(&serde_json::json!({ "read": true }))
+            .send()
+            .await?;
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::InvalidToken(
+                "GitHub rejected the token (401)".into(),
+            ));
+        }
+        res.error_for_status()?;
+        Ok(())
+    }
+
     pub async fn graphql<T: serde::de::DeserializeOwned>(
         &self,
         query: &str,

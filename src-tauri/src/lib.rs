@@ -76,6 +76,7 @@ pub fn run() {
       commands::unread_notification_count,
       commands::mark_notification_read,
       commands::mark_all_notifications_read,
+      commands::mark_repo_notifications_read,
       commands::sync_notifications_now,
       commands::list_notification_mutes,
       commands::set_notification_mute,

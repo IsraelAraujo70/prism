@@ -40,9 +40,26 @@ export function useNotifications() {
     await refresh()
   }, [refresh])
 
+  const markRepoRead = useCallback(
+    async (repoFull: string) => {
+      await api.markRepoNotificationsRead(repoFull)
+      await refresh()
+    },
+    [refresh],
+  )
+
   const syncNow = useCallback(async () => {
     await api.syncNotificationsNow()
   }, [])
 
-  return { items, unread, loading, markRead, markAllRead, syncNow, refresh }
+  return {
+    items,
+    unread,
+    loading,
+    markRead,
+    markAllRead,
+    markRepoRead,
+    syncNow,
+    refresh,
+  }
 }
