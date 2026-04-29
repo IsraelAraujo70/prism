@@ -1152,24 +1152,14 @@ pub async fn unread_notification_count(db: State<'_, DbState>) -> AppResult<i64>
 #[tauri::command]
 pub async fn mark_notification_read(
     thread_id: String,
-    db: State<'_, DbState>,
+    app: tauri::AppHandle,
 ) -> AppResult<()> {
-    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
-    let client = Client::new(token)?;
-    client.mark_notification_thread_read(&thread_id).await?;
-    let conn = db.0.lock().unwrap();
-    db::mark_notification_read(&conn, &thread_id);
-    Ok(())
+    notifications::mark_thread_read(&app, &thread_id).await
 }
 
 #[tauri::command]
-pub async fn mark_all_notifications_read(db: State<'_, DbState>) -> AppResult<()> {
-    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
-    let client = Client::new(token)?;
-    client.mark_all_notifications_read().await?;
-    let conn = db.0.lock().unwrap();
-    db::mark_all_notifications_read(&conn);
-    Ok(())
+pub async fn mark_all_notifications_read(app: tauri::AppHandle) -> AppResult<()> {
+    notifications::mark_all_read(&app).await
 }
 
 #[tauri::command]

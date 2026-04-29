@@ -1,7 +1,8 @@
 use crate::auth;
 use crate::db::{self, DbState, NotificationRow};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::github::{Client, GhNotification, NotificationsFetch};
+use crate::tray;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -47,10 +48,39 @@ pub async fn sync_once(app: &AppHandle) -> AppResult<Duration> {
                 }
             }
             log::info!("notifications: synced {count} item(s)");
+            tray::update_title(app);
             let _ = app.emit("notifications:changed", ());
             Ok(clamp_poll(poll_interval))
         }
     }
+}
+
+pub async fn mark_thread_read(app: &AppHandle, thread_id: &str) -> AppResult<()> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    client.mark_notification_thread_read(thread_id).await?;
+    {
+        let state = app.state::<DbState>();
+        let conn = state.0.lock().unwrap();
+        db::mark_notification_read(&conn, thread_id);
+    }
+    tray::update_title(app);
+    let _ = app.emit("notifications:changed", ());
+    Ok(())
+}
+
+pub async fn mark_all_read(app: &AppHandle) -> AppResult<()> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    client.mark_all_notifications_read().await?;
+    {
+        let state = app.state::<DbState>();
+        let conn = state.0.lock().unwrap();
+        db::mark_all_notifications_read(&conn);
+    }
+    tray::update_title(app);
+    let _ = app.emit("notifications:changed", ());
+    Ok(())
 }
 
 pub fn spawn_loop(app: AppHandle) {

@@ -4,6 +4,7 @@ mod db;
 mod error;
 mod github;
 mod notifications;
+mod tray;
 
 use std::sync::Mutex;
 
@@ -13,6 +14,14 @@ pub fn run() {
 
   tauri::Builder::default()
     .manage(db::DbState(Mutex::new(conn)))
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if window.label() == "main" {
+          let _ = window.hide();
+          api.prevent_close();
+        }
+      }
+    })
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -21,6 +30,7 @@ pub fn run() {
             .build(),
         )?;
       }
+      tray::build(app.handle())?;
       notifications::spawn_loop(app.handle().clone());
       Ok(())
     })
