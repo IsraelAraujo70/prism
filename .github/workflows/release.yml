@@ -2,12 +2,80 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
+  prepare-release:
+    name: Prepare release
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      release_name: ${{ steps.release.outputs.release_name }}
+      is_tag: ${{ steps.release.outputs.is_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read app version
+        id: version
+        run: |
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Decide release name and tag
+        id: meta
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "name=Prism ${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "is_tag=true" >> "$GITHUB_OUTPUT"
+          else
+            short_sha=$(git rev-parse --short HEAD)
+            echo "tag=v${{ steps.version.outputs.version }}-main.${{ github.run_number }}+${short_sha}" >> "$GITHUB_OUTPUT"
+            echo "name=Prism v${{ steps.version.outputs.version }} (main #${{ github.run_number }})" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "is_tag=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or fetch release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          NAME: ${{ steps.meta.outputs.name }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          IS_TAG: ${{ steps.meta.outputs.is_tag }}
+        run: |
+          set -e
+          existing=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" 2>/dev/null || echo '')
+          if [ -n "$existing" ] && [ "$existing" != '' ]; then
+            release_id=$(echo "$existing" | jq -r .id)
+            echo "Release for $TAG already exists ($release_id)"
+          else
+            payload=$(jq -n \
+              --arg tag "$TAG" \
+              --arg name "$NAME" \
+              --argjson prerelease $PRERELEASE \
+              '{tag_name:$tag, name:$name, draft:true, prerelease:$prerelease, target_commitish:"${{ github.sha }}"}')
+            release_id=$(gh api -X POST "repos/${{ github.repository }}/releases" --input - <<< "$payload" | jq -r .id)
+            echo "Created release $release_id for $TAG"
+          fi
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release_name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "is_tag=$IS_TAG" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare-release
     permissions:
       contents: write
     strategy:
@@ -61,13 +129,23 @@ jobs:
       - name: Install JS deps
         run: bun install --frozen-lockfile
 
-      - name: Build & release
+      - name: Build & upload artifacts
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
-          releaseName: Prism ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
-          releaseDraft: true
-          prerelease: ${{ github.ref_type != 'tag' }}
+          releaseId: ${{ needs.prepare-release.outputs.release_id }}
           args: ${{ matrix.args }}
+
+  finalize:
+    needs: [prepare-release, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Promote tag-triggered release out of draft
+        if: needs.prepare-release.outputs.is_tag == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release_id }}
+        run: |
+          gh api -X PATCH "repos/${{ github.repository }}/releases/$RELEASE_ID" -f draft=false
