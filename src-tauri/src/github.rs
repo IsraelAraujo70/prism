@@ -113,6 +113,8 @@ pub struct PullRequestRef {
     pub updated_at: String,
     pub comments: i64,
     pub draft: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 // ── Device Flow types ──────────────────────────────────

@@ -29,6 +29,7 @@ import {
   type WatchedRepo,
 } from '@/lib/api'
 import { formatRelative } from '@/lib/format'
+import { RepoPrList } from '@/components/repo-pr-list'
 
 type State =
   | { status: 'loading' }
@@ -147,6 +148,12 @@ export function Dashboard({ repo, onClear, onSelectPr }: Props) {
 
           {state.status === 'ready' && !noWatched && (
             <DashboardContent data={state.data} onSelectPr={onSelectPr} />
+          )}
+
+          {state.status === 'ready' && repo && (
+            <section>
+              <RepoPrList repo={repo} onSelectPr={onSelectPr} />
+            </section>
           )}
         </div>
       </div>

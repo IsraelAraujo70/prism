@@ -77,6 +77,15 @@ export type PullRequestRef = {
   updated_at: string
   comments: number
   draft: boolean
+  state?: string
+}
+
+export type RepoPrScope = 'open' | 'closed' | 'all'
+
+export type RepoPrPage = {
+  items: PullRequestRef[]
+  total: number
+  next_cursor: string | null
 }
 
 export type ContributorStat = {
@@ -241,6 +250,19 @@ export const api = {
 
   getDashboard: (repoFullName?: string | null) =>
     invoke<Dashboard>('get_dashboard', { repoFullName: repoFullName ?? null }),
+
+  listRepoPrs: (
+    owner: string,
+    name: string,
+    scope: RepoPrScope,
+    after?: string | null,
+  ) =>
+    invoke<RepoPrPage>('list_repo_prs', {
+      owner,
+      name,
+      scope,
+      after: after ?? null,
+    }),
 
   getPrDetails: (owner: string, name: string, number: number) =>
     invoke<PrDetails>('get_pr_details', { owner, name, number }),
