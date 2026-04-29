@@ -1529,6 +1529,114 @@ pub async fn list_repo_prs(
     })
 }
 
+// ── PR search (command palette) ────────────────────────
+
+const PR_SEARCH_QUERY: &str = r#"
+query($q: String!) {
+  search(query: $q, type: ISSUE, first: 15) {
+    nodes {
+      ... on PullRequest {
+        databaseId
+        number
+        title
+        url
+        updatedAt
+        isDraft
+        state
+        comments { totalCount }
+        author { login avatarUrl }
+        repository { nameWithOwner }
+      }
+    }
+  }
+}
+"#;
+
+#[derive(Deserialize)]
+struct PrSearchData {
+    search: PrSearchConnection,
+}
+
+#[derive(Deserialize)]
+struct PrSearchConnection {
+    nodes: Vec<RepoPrNode>,
+}
+
+#[tauri::command]
+pub async fn search_prs(
+    query: String,
+    db: State<'_, DbState>,
+) -> AppResult<Vec<PullRequestRef>> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let repos = {
+        let conn = db.0.lock().unwrap();
+        db::list_watched(&conn)
+    };
+    if repos.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let repo_filter = repos
+        .iter()
+        .map(|r| format!("repo:{}", r.full_name))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+
+    let q = format!("is:pr {trimmed} {repo_filter}");
+    let variables = serde_json::json!({ "q": q });
+
+    let data: PrSearchData = client.graphql(PR_SEARCH_QUERY, variables).await?;
+    let items: Vec<PullRequestRef> = data
+        .search
+        .nodes
+        .into_iter()
+        .filter_map(repo_pr_from_node)
+        .collect();
+
+    Ok(items)
+}
+
+#[tauri::command]
+pub async fn search_prs_in_repo(
+    owner: String,
+    name: String,
+    query: String,
+) -> AppResult<Vec<PullRequestRef>> {
+    let trimmed_owner = owner.trim();
+    let trimmed_name = name.trim();
+    if trimmed_owner.is_empty() || trimmed_name.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+
+    let term = query.trim();
+    let q = if term.is_empty() {
+        format!("is:pr repo:{trimmed_owner}/{trimmed_name}")
+    } else {
+        format!("is:pr {term} repo:{trimmed_owner}/{trimmed_name}")
+    };
+    let variables = serde_json::json!({ "q": q });
+
+    let data: PrSearchData = client.graphql(PR_SEARCH_QUERY, variables).await?;
+    let items: Vec<PullRequestRef> = data
+        .search
+        .nodes
+        .into_iter()
+        .filter_map(repo_pr_from_node)
+        .collect();
+
+    Ok(items)
+}
+
 // ── GitHub API ─────────────────────────────────────────
 
 #[tauri::command]

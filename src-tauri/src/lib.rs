@@ -60,6 +60,8 @@ pub fn run() {
       commands::remove_tracked_org,
       commands::list_all_repos,
       commands::list_repo_prs,
+      commands::search_prs,
+      commands::search_prs_in_repo,
       commands::get_dashboard,
       commands::get_pr_details,
       commands::get_pr_files,

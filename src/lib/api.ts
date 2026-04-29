@@ -264,6 +264,12 @@ export const api = {
       after: after ?? null,
     }),
 
+  searchPrs: (query: string) =>
+    invoke<PullRequestRef[]>('search_prs', { query }),
+
+  searchPrsInRepo: (owner: string, name: string, query: string) =>
+    invoke<PullRequestRef[]>('search_prs_in_repo', { owner, name, query }),
+
   getPrDetails: (owner: string, name: string, number: number) =>
     invoke<PrDetails>('get_pr_details', { owner, name, number }),
 

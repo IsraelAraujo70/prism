@@ -1,12 +1,14 @@
 import { Loader2, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
+import { CommandPalette } from '@/components/command-palette'
 import { Dashboard } from '@/components/dashboard'
 import { Inbox } from '@/components/inbox'
 import { InboxSidebarLink } from '@/components/inbox-sidebar-link'
 import { LoginForm } from '@/components/login-form'
 import { PrViewer } from '@/components/pr-viewer'
 import { RepoList } from '@/components/repo-list'
+import { SearchSidebarLink } from '@/components/search-sidebar-link'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { UserMenu } from '@/components/user-menu'
 import {
@@ -32,6 +34,7 @@ function App() {
   const [selectedRepo, setSelectedRepo] = useState<WatchedRepo | null>(null)
   const [selectedPr, setSelectedPr] = useState<PullRequestRef | null>(null)
   const [inboxOpen, setInboxOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   useEffect(() => {
     api
@@ -57,9 +60,15 @@ function App() {
   useEffect(() => {
     if (state.kind !== 'authenticated') return
     function onKeydown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      const mod = e.ctrlKey || e.metaKey
+      if (!mod) return
+      const key = e.key.toLowerCase()
+      if (key === 'b') {
         e.preventDefault()
         toggleCollapsed()
+      } else if (key === 'k') {
+        e.preventDefault()
+        setPaletteOpen((prev) => !prev)
       }
     }
     window.addEventListener('keydown', onKeydown)
@@ -146,6 +155,10 @@ function App() {
           </div>
         )}
 
+        <SearchSidebarLink
+          collapsed={collapsed}
+          onClick={() => setPaletteOpen(true)}
+        />
         <InboxSidebarLink
           collapsed={collapsed}
           active={inboxOpen}
@@ -181,6 +194,20 @@ function App() {
           onSelectPr={setSelectedPr}
         />
       )}
+
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onSelectRepo={(repo) => {
+          setSelectedRepo(repo)
+          setSelectedPr(null)
+          setInboxOpen(false)
+        }}
+        onSelectPr={(pr) => {
+          setSelectedPr(pr)
+          setInboxOpen(false)
+        }}
+      />
     </div>
   )
 }

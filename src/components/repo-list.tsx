@@ -114,9 +114,9 @@ export function RepoList({
 
   if (collapsed) {
     return (
-      <nav className="flex flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden py-3">
+      <nav className="flex flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden pt-1 pb-3">
         <AddRepoDialog watchedIds={watchedIds} onChanged={load} compact />
-        {settingsSlot && <div className="mb-1">{settingsSlot}</div>}
+        {settingsSlot}
         <div className="my-1 h-px w-6 bg-sidebar-border" />
         {state.status === 'ready' &&
           groups.map((group) => (
