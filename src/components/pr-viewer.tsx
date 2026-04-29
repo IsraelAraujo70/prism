@@ -18,8 +18,10 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { CommentCard } from '@/components/comment-card'
 import { DiffViewer } from '@/components/diff-viewer'
 import { Markdown } from '@/components/markdown'
+import { ReviewThreadCard } from '@/components/review-thread-card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -904,222 +906,60 @@ function MergeSection({
   )
 }
 
-function TimelineItem({ entry }: { entry: TimelineEntry }) {
-  if (entry.kind === 'review_thread') {
-    return <ReviewThreadItem entry={entry} />
-  }
-
-  if (entry.kind === 'comment') {
-    return (
-      <li className="rounded-xl bg-card ring-1 ring-foreground/10">
-        <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-          {entry.author && (
-            <>
-              <Avatar className="size-6">
-                <AvatarImage
-                  src={entry.author.avatar_url}
-                  alt={entry.author.login}
-                />
-                <AvatarFallback className="bg-muted text-[9px] font-semibold">
-                  {entry.author.login.slice(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <span className="text-sm font-medium text-foreground">
-                {entry.author.login}
-              </span>
-            </>
-          )}
-          <span className="text-xs text-muted-foreground">comentou</span>
-          <span
-            className="ml-auto text-xs text-muted-foreground/70"
-            title={formatAbsolute(entry.created_at)}
-          >
-            {formatRelative(entry.created_at)}
-          </span>
-        </header>
-        <div className="px-4 py-3">
-          {entry.body.trim().length > 0 ? (
-            <Markdown>{entry.body}</Markdown>
-          ) : (
-            <p className="text-sm italic text-muted-foreground">(sem texto)</p>
-          )}
-        </div>
-      </li>
-    )
-  }
-
-  const reviewConfig: Record<
-    string,
-    { label: string; className: string; icon: LucideIcon }
-  > = {
-    APPROVED: {
-      label: 'aprovou',
-      className: 'text-emerald-400',
-      icon: Check,
-    },
-    CHANGES_REQUESTED: {
-      label: 'pediu mudanças',
-      className: 'text-rose-400',
-      icon: MessageCircleX,
-    },
-    COMMENTED: {
-      label: 'comentou na review',
-      className: 'text-muted-foreground',
-      icon: MessageSquare,
-    },
-    DISMISSED: {
-      label: 'review descartada',
-      className: 'text-muted-foreground',
-      icon: CircleDashed,
-    },
-  }
-  const cfg = reviewConfig[entry.state] ?? {
-    label: entry.state.toLowerCase(),
+const REVIEW_ACTION: Record<
+  string,
+  { label: string; className: string; icon: LucideIcon }
+> = {
+  APPROVED: {
+    label: 'aprovou',
+    className: 'text-emerald-400',
+    icon: Check,
+  },
+  CHANGES_REQUESTED: {
+    label: 'pediu mudanças',
+    className: 'text-rose-400',
+    icon: MessageCircleX,
+  },
+  COMMENTED: {
+    label: 'comentou na review',
     className: 'text-muted-foreground',
     icon: MessageSquare,
-  }
-
-  return (
-    <li className="rounded-xl bg-card ring-1 ring-foreground/10">
-      <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        {entry.author && (
-          <>
-            <Avatar className="size-6">
-              <AvatarImage
-                src={entry.author.avatar_url}
-                alt={entry.author.login}
-              />
-              <AvatarFallback className="bg-muted text-[9px] font-semibold">
-                {entry.author.login.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <span className="text-sm font-medium text-foreground">
-              {entry.author.login}
-            </span>
-          </>
-        )}
-        <span className={`inline-flex items-center gap-1 text-xs ${cfg.className}`}>
-          <cfg.icon className="size-3.5" />
-          {cfg.label}
-        </span>
-        <span
-          className="ml-auto text-xs text-muted-foreground/70"
-          title={formatAbsolute(entry.submitted_at)}
-        >
-          {formatRelative(entry.submitted_at)}
-        </span>
-      </header>
-      {entry.body.trim().length > 0 && (
-        <div className="px-4 py-3">
-          <Markdown>{entry.body}</Markdown>
-        </div>
-      )}
-    </li>
-  )
+  },
+  DISMISSED: {
+    label: 'review descartada',
+    className: 'text-muted-foreground',
+    icon: CircleDashed,
+  },
 }
 
-function ReviewThreadItem({
-  entry,
-}: {
-  entry: Extract<TimelineEntry, { kind: 'review_thread' }>
-}) {
-  const first = entry.comments[0]
+function TimelineItem({ entry }: { entry: TimelineEntry }) {
+  if (entry.kind === 'review_thread') {
+    return <ReviewThreadCard thread={entry} />
+  }
+  if (entry.kind === 'comment') {
+    return (
+      <CommentCard
+        author={entry.author}
+        createdAt={entry.created_at}
+        body={entry.body}
+        action={{ label: 'comentou' }}
+        placeholderForEmpty
+      />
+    )
+  }
+  const cfg =
+    REVIEW_ACTION[entry.state] ?? {
+      label: entry.state.toLowerCase(),
+      className: 'text-muted-foreground',
+      icon: MessageSquare,
+    }
   return (
-    <li className="rounded-xl bg-card ring-1 ring-foreground/10">
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
-        {first?.author && (
-          <>
-            <Avatar className="size-6">
-              <AvatarImage
-                src={first.author.avatar_url}
-                alt={first.author.login}
-              />
-              <AvatarFallback className="bg-muted text-[9px] font-semibold">
-                {first.author.login.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <span className="text-sm font-medium text-foreground">
-              {first.author.login}
-            </span>
-          </>
-        )}
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          <MessageSquare className="size-3.5" />
-          comentou em
-        </span>
-        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/80">
-          {entry.path}
-          {entry.line != null && (
-            <span className="text-muted-foreground"> :{entry.line}</span>
-          )}
-        </code>
-        {entry.is_resolved && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400">
-            <Check className="size-3" />
-            resolved
-          </span>
-        )}
-        {entry.is_outdated && (
-          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-            outdated
-          </span>
-        )}
-        {first?.state === 'PENDING' && (
-          <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-400">
-            pending
-          </span>
-        )}
-        {first && (
-          <span
-            className="ml-auto text-xs text-muted-foreground/70"
-            title={formatAbsolute(first.created_at)}
-          >
-            {formatRelative(first.created_at)}
-          </span>
-        )}
-      </header>
-      <ul className="flex flex-col">
-        {entry.comments.map((c, i) => (
-          <li
-            key={i}
-            className={i > 0 ? 'border-t border-border/60' : ''}
-          >
-            <div className="flex items-start gap-3 px-4 py-3">
-              {i > 0 && c.author && (
-                <Avatar className="size-5 mt-0.5">
-                  <AvatarImage src={c.author.avatar_url} alt={c.author.login} />
-                  <AvatarFallback className="bg-muted text-[8px] font-semibold">
-                    {c.author.login.slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-              )}
-              <div className="min-w-0 flex-1">
-                {i > 0 && c.author && (
-                  <div className="mb-1 flex items-center gap-2">
-                    <span className="text-xs font-medium text-foreground">
-                      {c.author.login}
-                    </span>
-                    <span
-                      className="text-[11px] text-muted-foreground/70"
-                      title={formatAbsolute(c.created_at)}
-                    >
-                      {formatRelative(c.created_at)}
-                    </span>
-                  </div>
-                )}
-                {c.body.trim().length > 0 ? (
-                  <Markdown>{c.body}</Markdown>
-                ) : (
-                  <p className="text-sm italic text-muted-foreground">
-                    (sem texto)
-                  </p>
-                )}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </li>
+    <CommentCard
+      author={entry.author}
+      createdAt={entry.submitted_at}
+      body={entry.body}
+      action={cfg}
+    />
   )
 }
 
