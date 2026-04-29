@@ -1054,7 +1054,9 @@ function SplitCell({
     line.kind === 'context' ? (side === 'left' ? line.old : line.new)
     : line.kind === 'del' ? line.old
     : line.new
-  const wrapClass = wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'
+  const innerClass = wrap
+    ? 'whitespace-pre-wrap break-all'
+    : 'overflow-hidden whitespace-pre'
 
   return (
     <>
@@ -1063,9 +1065,11 @@ function SplitCell({
       >
         {num}
       </td>
-      <td className={`${wrapClass} px-3 align-top text-foreground/90 ${tone}`}>
-        <span className={`mr-2 select-none ${signTone}`}>{sign}</span>
-        <HighlightedText text={line.text} highlightLine={highlightLine} />
+      <td className={`px-3 align-top text-foreground/90 ${tone}`}>
+        <div className={innerClass}>
+          <span className={`mr-2 select-none ${signTone}`}>{sign}</span>
+          <HighlightedText text={line.text} highlightLine={highlightLine} />
+        </div>
       </td>
     </>
   )
