@@ -56,9 +56,8 @@ jobs:
           IS_TAG: ${{ steps.meta.outputs.is_tag }}
         run: |
           set -e
-          existing=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" 2>/dev/null || echo '')
-          if [ -n "$existing" ] && [ "$existing" != '' ]; then
-            release_id=$(echo "$existing" | jq -r .id)
+          if existing=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" 2>/dev/null); then
+            release_id=$(printf '%s' "$existing" | jq -r .id)
             echo "Release for $TAG already exists ($release_id)"
           else
             payload=$(jq -n \
