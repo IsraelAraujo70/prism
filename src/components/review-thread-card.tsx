@@ -5,11 +5,17 @@ import {
   MessageSquare,
   Reply,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import { CommentRow } from '@/components/comment-card'
+import { HighlightedText } from '@/components/highlighted-text'
 import type { ThreadComment } from '@/lib/api'
+import type { DiffLine } from '@/lib/diff'
 import { formatAbsolute, formatRelative } from '@/lib/format'
+import {
+  getLanguageFromFilename,
+  useHighlightLine,
+} from '@/lib/highlight'
 
 export type ReviewThread = {
   id: string
@@ -24,11 +30,13 @@ export type ReviewThread = {
 export function ReviewThreadCard({
   thread,
   showFile = true,
+  snippet,
   onReply,
   onResolveToggle,
 }: {
   thread: ReviewThread
   showFile?: boolean
+  snippet?: DiffLine[] | null
   onReply?: (body: string) => Promise<void>
   onResolveToggle?: () => Promise<void>
 }) {
@@ -69,6 +77,9 @@ export function ReviewThreadCard({
           </span>
         )}
       </header>
+      {snippet && snippet.length > 0 && (
+        <SnippetPreview path={thread.path} lines={snippet} />
+      )}
       <ul className="flex flex-col">
         {thread.comments.map((c, i) => (
           <li key={i} className={i > 0 ? 'border-t border-border/60' : ''}>
@@ -90,6 +101,64 @@ export function ReviewThreadCard({
         />
       )}
     </li>
+  )
+}
+
+function SnippetPreview({
+  path,
+  lines,
+}: {
+  path: string
+  lines: DiffLine[]
+}) {
+  const lang = useMemo(() => getLanguageFromFilename(path), [path])
+  const highlightLine = useHighlightLine(lang)
+  return (
+    <div className="border-b border-border/60 bg-background/40">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse font-mono text-[12px] leading-5">
+          <tbody>
+            {lines.map((line, i) => (
+              <SnippetRow key={i} line={line} highlightLine={highlightLine} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function SnippetRow({
+  line,
+  highlightLine,
+}: {
+  line: DiffLine
+  highlightLine: ReturnType<typeof useHighlightLine>
+}) {
+  const tone =
+    line.kind === 'add'
+      ? 'bg-emerald-500/10'
+      : line.kind === 'del'
+        ? 'bg-rose-500/10'
+        : ''
+  const sign = line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '
+  const signTone =
+    line.kind === 'add'
+      ? 'text-emerald-400/80'
+      : line.kind === 'del'
+        ? 'text-rose-400/80'
+        : 'text-muted-foreground/40'
+  const num = line.kind === 'del' ? line.old : line.new
+  return (
+    <tr className={tone}>
+      <td className="w-12 select-none border-r border-border/40 px-2 align-top text-right text-[11px] tabular-nums text-muted-foreground/50">
+        {num}
+      </td>
+      <td className="whitespace-pre px-3 align-top text-foreground/90">
+        <span className={`mr-2 select-none ${signTone}`}>{sign}</span>
+        <HighlightedText text={line.text} highlightLine={highlightLine} />
+      </td>
+    </tr>
   )
 }
 

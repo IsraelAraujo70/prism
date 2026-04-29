@@ -27,11 +27,17 @@ import {
   useState,
 } from 'react'
 
+import { HighlightedText } from '@/components/highlighted-text'
 import {
   ReviewThreadCard,
   type ReviewThread,
 } from '@/components/review-thread-card'
 import { api, type PrFile } from '@/lib/api'
+import {
+  parseDiff,
+  type DiffLine,
+  type Hunk,
+} from '@/lib/diff'
 import {
   getLanguageFromFilename,
   useHighlightLine,
@@ -1075,26 +1081,6 @@ function SplitCell({
   )
 }
 
-function HighlightedText({
-  text,
-  highlightLine,
-}: {
-  text: string
-  highlightLine: HighlightLineFn
-}) {
-  const tokens = highlightLine(text)
-  if (!tokens) return <>{text}</>
-  return (
-    <>
-      {tokens.map((tok, i) => (
-        <span key={i} style={tok.color ? { color: tok.color } : undefined}>
-          {tok.content}
-        </span>
-      ))}
-    </>
-  )
-}
-
 type StatusKey =
   | 'added'
   | 'removed'
@@ -1131,57 +1117,6 @@ function StatusIcon({ status }: { status: string }) {
   return (
     <Icon className={`size-3.5 shrink-0 ${cfg.color}`} aria-label={cfg.label} />
   )
-}
-
-type DiffLine =
-  | { kind: 'context'; old: number; new: number; text: string }
-  | { kind: 'add'; new: number; text: string }
-  | { kind: 'del'; old: number; text: string }
-
-type Hunk = {
-  oldStart: number
-  newStart: number
-  header: string
-  lines: DiffLine[]
-}
-
-const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/
-
-function parseDiff(patch: string): Hunk[] {
-  const hunks: Hunk[] = []
-  let current: Hunk | null = null
-  let oldNo = 0
-  let newNo = 0
-
-  for (const raw of patch.split('\n')) {
-    const match = HUNK_HEADER.exec(raw)
-    if (match) {
-      oldNo = parseInt(match[1], 10)
-      newNo = parseInt(match[2], 10)
-      current = {
-        oldStart: oldNo,
-        newStart: newNo,
-        header: match[3].trim(),
-        lines: [],
-      }
-      hunks.push(current)
-      continue
-    }
-    if (!current) continue
-    if (raw.startsWith('+')) {
-      current.lines.push({ kind: 'add', new: newNo++, text: raw.slice(1) })
-    } else if (raw.startsWith('-')) {
-      current.lines.push({ kind: 'del', old: oldNo++, text: raw.slice(1) })
-    } else if (raw.startsWith(' ')) {
-      current.lines.push({
-        kind: 'context',
-        old: oldNo++,
-        new: newNo++,
-        text: raw.slice(1),
-      })
-    }
-  }
-  return hunks
 }
 
 function readViewMode(): ViewMode {

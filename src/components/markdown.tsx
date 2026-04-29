@@ -1,7 +1,26 @@
 import ReactMarkdown, { type Components } from 'react-markdown'
+import rehypeRaw from 'rehype-raw'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 
 import { api } from '@/lib/api'
+
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [
+    ...(defaultSchema.tagNames ?? []),
+    'sub',
+    'sup',
+    'kbd',
+    'details',
+    'summary',
+    'mark',
+  ],
+  attributes: {
+    ...(defaultSchema.attributes ?? {}),
+    details: [...((defaultSchema.attributes ?? {}).details ?? []), 'open'],
+  },
+}
 
 const components: Components = {
   h1: ({ children }) => (
@@ -114,12 +133,35 @@ const components: Components = {
       />
     )
   },
+  sub: ({ children }) => (
+    <sub className="text-[0.75em] text-muted-foreground">{children}</sub>
+  ),
+  sup: ({ children }) => <sup className="text-[0.75em]">{children}</sup>,
+  kbd: ({ children }) => (
+    <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground/80">
+      {children}
+    </kbd>
+  ),
+  details: ({ children }) => (
+    <details className="my-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm">
+      {children}
+    </details>
+  ),
+  summary: ({ children }) => (
+    <summary className="cursor-pointer select-none text-foreground/90 hover:text-foreground">
+      {children}
+    </summary>
+  ),
 }
 
 export function Markdown({ children }: { children: string }) {
   return (
     <div className="break-words">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+        components={components}
+      >
         {children}
       </ReactMarkdown>
     </div>

@@ -16,7 +16,7 @@ import {
   RefreshCw,
   type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { CommentCard } from '@/components/comment-card'
 import { DiffViewer } from '@/components/diff-viewer'
@@ -33,6 +33,7 @@ import {
   type PullRequestRef,
   type TimelineEntry,
 } from '@/lib/api'
+import { extractDiffSnippet } from '@/lib/diff'
 import { formatAbsolute, formatRelative } from '@/lib/format'
 
 type State =
@@ -182,6 +183,9 @@ export function PrViewer({ pr, onBack }: Props) {
           <div className="mx-auto flex max-w-4xl flex-col gap-5">
             <ConversationContent
               data={state.data}
+              files={
+                filesState.status === 'ready' ? filesState.files : null
+              }
               merging={merging}
               mergeError={mergeError}
               onMerge={(method) => doMerge(state.data.node_id, method)}
@@ -210,12 +214,14 @@ export function PrViewer({ pr, onBack }: Props) {
 
 function ConversationContent({
   data,
+  files,
   merging,
   mergeError,
   onMerge,
   onAfterMutation,
 }: {
   data: PrDetails
+  files: PrFile[] | null
   merging: boolean
   mergeError: string | null
   onMerge: (method: MergeMethod) => void
@@ -225,6 +231,15 @@ function ConversationContent({
   const reviewers = mergeReviewers(data)
   const canMerge =
     status === 'open' && data.mergeable === 'MERGEABLE' && !data.is_draft
+  const patchByPath = useMemo(() => {
+    const map = new Map<string, string>()
+    if (files) {
+      for (const f of files) {
+        if (f.patch) map.set(f.filename, f.patch)
+      }
+    }
+    return map
+  }, [files])
 
   return (
     <>
@@ -340,6 +355,7 @@ function ConversationContent({
               <TimelineItem
                 key={i}
                 entry={entry}
+                patchByPath={patchByPath}
                 onAfterMutation={onAfterMutation}
               />
             ))}
@@ -952,15 +968,23 @@ const REVIEW_ACTION: Record<
 
 function TimelineItem({
   entry,
+  patchByPath,
   onAfterMutation,
 }: {
   entry: TimelineEntry
+  patchByPath: Map<string, string>
   onAfterMutation: () => Promise<void>
 }) {
   if (entry.kind === 'review_thread') {
+    const patch = patchByPath.get(entry.path)
+    const snippet =
+      patch && entry.line != null
+        ? extractDiffSnippet(patch, entry.line)
+        : null
     return (
       <ReviewThreadCard
         thread={entry}
+        snippet={snippet}
         onReply={async (body) => {
           await api.addReviewThreadReply(entry.id, body)
           await onAfterMutation()
