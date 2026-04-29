@@ -1,10 +1,11 @@
 use crate::auth;
-use crate::db::{self, DbState, WatchedRepo};
+use crate::db::{self, DbState, NotificationRow, WatchedRepo};
 use crate::error::{AppError, AppResult};
 use crate::github::{
     self, Client, DeviceCodeResponse, DevicePollResult, GithubUser, OrgRef, PollOutcome,
     PrAuthor, PrFile, PullRequestRef, Repo,
 };
+use crate::notifications;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
@@ -1132,6 +1133,48 @@ pub async fn get_pr_files(
 ) -> AppResult<Vec<PrFile>> {
     let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
     Client::new(token)?.list_pr_files(&owner, &name, number).await
+}
+
+// ── Notifications ──────────────────────────────────────
+
+#[tauri::command]
+pub async fn list_notifications(db: State<'_, DbState>) -> AppResult<Vec<NotificationRow>> {
+    let conn = db.0.lock().unwrap();
+    Ok(db::list_notifications(&conn))
+}
+
+#[tauri::command]
+pub async fn unread_notification_count(db: State<'_, DbState>) -> AppResult<i64> {
+    let conn = db.0.lock().unwrap();
+    Ok(db::unread_count(&conn))
+}
+
+#[tauri::command]
+pub async fn mark_notification_read(
+    thread_id: String,
+    db: State<'_, DbState>,
+) -> AppResult<()> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    client.mark_notification_thread_read(&thread_id).await?;
+    let conn = db.0.lock().unwrap();
+    db::mark_notification_read(&conn, &thread_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn mark_all_notifications_read(db: State<'_, DbState>) -> AppResult<()> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    client.mark_all_notifications_read().await?;
+    let conn = db.0.lock().unwrap();
+    db::mark_all_notifications_read(&conn);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn sync_notifications_now(app: tauri::AppHandle) -> AppResult<()> {
+    notifications::sync_once(&app).await.map(|_| ())
 }
 
 // ── GitHub API ─────────────────────────────────────────

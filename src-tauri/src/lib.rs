@@ -3,6 +3,7 @@ mod commands;
 mod db;
 mod error;
 mod github;
+mod notifications;
 
 use std::sync::Mutex;
 
@@ -20,6 +21,7 @@ pub fn run() {
             .build(),
         )?;
       }
+      notifications::spawn_loop(app.handle().clone());
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
@@ -45,6 +47,11 @@ pub fn run() {
       commands::add_review_thread_reply,
       commands::resolve_review_thread,
       commands::unresolve_review_thread,
+      commands::list_notifications,
+      commands::unread_notification_count,
+      commands::mark_notification_read,
+      commands::mark_all_notifications_read,
+      commands::sync_notifications_now,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

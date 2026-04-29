@@ -191,6 +191,19 @@ export type PrDetails = {
   checks: CheckEntry[]
 }
 
+export type NotificationRow = {
+  id: string
+  repo_full: string
+  subject_type: string
+  subject_url: string | null
+  pr_number: number | null
+  reason: string
+  title: string
+  unread: boolean
+  updated_at: string
+  last_seen_at: string
+}
+
 export const api = {
   getAuthStatus: () => invoke<AuthStatus>('get_auth_status'),
   startDeviceFlow: () => invoke<DeviceCodeResponse>('start_device_flow'),
@@ -234,4 +247,11 @@ export const api = {
     invoke<void>('resolve_review_thread', { threadId }),
   unresolveReviewThread: (threadId: string) =>
     invoke<void>('unresolve_review_thread', { threadId }),
+
+  listNotifications: () => invoke<NotificationRow[]>('list_notifications'),
+  unreadNotificationCount: () => invoke<number>('unread_notification_count'),
+  markNotificationRead: (threadId: string) =>
+    invoke<void>('mark_notification_read', { threadId }),
+  markAllNotificationsRead: () => invoke<void>('mark_all_notifications_read'),
+  syncNotificationsNow: () => invoke<void>('sync_notifications_now'),
 }
