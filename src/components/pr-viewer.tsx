@@ -198,6 +198,9 @@ export function PrViewer({ pr, onBack }: Props) {
       {state.status === 'ready' && tab === 'files' && (
         <FilesPane
           prKey={`${pr.repo}#${pr.number}`}
+          prNodeId={state.data.node_id}
+          pendingReviewId={state.data.pending_review_id}
+          pendingReviewThreadsCount={state.data.pending_review_threads_count}
           filesState={filesState}
           additions={state.data.additions}
           deletions={state.data.deletions}
@@ -409,6 +412,9 @@ function TabsNav({
 
 function FilesPane({
   prKey,
+  prNodeId,
+  pendingReviewId,
+  pendingReviewThreadsCount,
   filesState,
   additions,
   deletions,
@@ -416,6 +422,9 @@ function FilesPane({
   onAfterMutation,
 }: {
   prKey: string
+  prNodeId: string
+  pendingReviewId: string | null
+  pendingReviewThreadsCount: number
   filesState: FilesState
   additions: number
   deletions: number
@@ -439,14 +448,131 @@ function FilesPane({
     )
   }
   return (
-    <DiffViewer
-      prKey={prKey}
-      files={filesState.files}
-      additions={additions}
-      deletions={deletions}
-      threads={threads}
-      onAfterMutation={onAfterMutation}
-    />
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {pendingReviewId && (
+        <SubmitReviewPanel
+          reviewId={pendingReviewId}
+          pendingThreadsCount={pendingReviewThreadsCount}
+          onSubmitted={onAfterMutation}
+        />
+      )}
+      <DiffViewer
+        prKey={prKey}
+        prNodeId={prNodeId}
+        pendingReviewId={pendingReviewId}
+        files={filesState.files}
+        additions={additions}
+        deletions={deletions}
+        threads={threads}
+        onAfterMutation={onAfterMutation}
+      />
+    </div>
+  )
+}
+
+type ReviewVerdict = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES'
+
+function SubmitReviewPanel({
+  reviewId,
+  pendingThreadsCount,
+  onSubmitted,
+}: {
+  reviewId: string
+  pendingThreadsCount: number
+  onSubmitted: () => Promise<void>
+}) {
+  const [body, setBody] = useState('')
+  const [submitting, setSubmitting] = useState<ReviewVerdict | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(verdict: ReviewVerdict) {
+    if (submitting) return
+    setSubmitting(verdict)
+    setError(null)
+    try {
+      await api.submitPrReview(reviewId, body, verdict)
+      setBody('')
+      await onSubmitted()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setSubmitting(null)
+    }
+  }
+
+  const countLabel =
+    pendingThreadsCount === 0
+      ? 'Sem comentários ainda'
+      : pendingThreadsCount === 1
+        ? '1 comentário pendente'
+        : `${pendingThreadsCount} comentários pendentes`
+
+  return (
+    <div className="shrink-0 border-b border-primary/30 bg-primary/5 px-4 py-3">
+      <div className="mx-auto flex max-w-4xl flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <span className="size-2 rounded-full bg-primary" />
+          <span className="text-xs font-medium text-foreground">
+            Review em andamento
+          </span>
+          <span className="text-xs text-muted-foreground">· {countLabel}</span>
+        </div>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Resumo da review (opcional)…"
+          rows={2}
+          disabled={submitting !== null}
+          className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-sans text-sm leading-snug text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+        />
+        {error && (
+          <p className="rounded-md bg-destructive/10 px-2 py-1 text-xs text-destructive">
+            {error}
+          </p>
+        )}
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => submit('COMMENT')}
+            disabled={submitting !== null}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+          >
+            {submitting === 'COMMENT' ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <MessageSquare className="size-3.5" />
+            )}
+            Comentar
+          </button>
+          <button
+            type="button"
+            onClick={() => submit('REQUEST_CHANGES')}
+            disabled={submitting !== null}
+            className="inline-flex items-center gap-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400 transition-colors hover:bg-rose-500/20 disabled:opacity-50"
+          >
+            {submitting === 'REQUEST_CHANGES' ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <MessageCircleX className="size-3.5" />
+            )}
+            Solicitar mudanças
+          </button>
+          <button
+            type="button"
+            onClick={() => submit('APPROVE')}
+            disabled={submitting !== null}
+            className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-400 ring-1 ring-emerald-500/20 transition-colors hover:bg-emerald-500/25 disabled:opacity-50"
+          >
+            {submitting === 'APPROVE' ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Check className="size-3.5" />
+            )}
+            Aprovar
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

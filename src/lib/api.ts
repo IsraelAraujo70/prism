@@ -189,7 +189,12 @@ export type PrDetails = {
   timeline: TimelineEntry[]
   checks_state: string | null
   checks: CheckEntry[]
+  pending_review_id: string | null
+  pending_review_threads_count: number
 }
+
+export type ReviewSide = 'LEFT' | 'RIGHT'
+export type ReviewEvent = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES'
 
 export type NotificationMutes = {
   reasons: string[]
@@ -252,6 +257,29 @@ export const api = {
     invoke<void>('resolve_review_thread', { threadId }),
   unresolveReviewThread: (threadId: string) =>
     invoke<void>('unresolve_review_thread', { threadId }),
+
+  startPrReview: (prNodeId: string) =>
+    invoke<string>('start_pr_review', { prNodeId }),
+  addPrReviewThread: (args: {
+    reviewId: string
+    path: string
+    line: number
+    side: ReviewSide
+    startLine?: number | null
+    startSide?: ReviewSide | null
+    body: string
+  }) =>
+    invoke<void>('add_pr_review_thread', {
+      reviewId: args.reviewId,
+      path: args.path,
+      line: args.line,
+      side: args.side,
+      startLine: args.startLine ?? null,
+      startSide: args.startSide ?? null,
+      body: args.body,
+    }),
+  submitPrReview: (reviewId: string, body: string, event: ReviewEvent) =>
+    invoke<void>('submit_pr_review', { reviewId, body, event }),
 
   listNotifications: () => invoke<NotificationRow[]>('list_notifications'),
   unreadNotificationCount: () => invoke<number>('unread_notification_count'),

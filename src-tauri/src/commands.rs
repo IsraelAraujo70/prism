@@ -475,10 +475,13 @@ pub struct PrDetails {
     pub timeline: Vec<TimelineEntry>,
     pub checks_state: Option<String>,
     pub checks: Vec<CheckEntry>,
+    pub pending_review_id: Option<String>,
+    pub pending_review_threads_count: i64,
 }
 
 const PR_DETAILS_QUERY: &str = r#"
 query($owner: String!, $name: String!, $number: Int!) {
+  viewer { login }
   repository(owner: $owner, name: $name) {
     nameWithOwner
     pullRequest(number: $number) {
@@ -520,6 +523,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       }
       reviews(first: 50) {
         nodes {
+          id
           author { login avatarUrl }
           body
           state
@@ -585,7 +589,13 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 #[derive(Deserialize)]
 struct PrGqlData {
+    viewer: GqlViewer,
     repository: Option<PrGqlRepo>,
+}
+
+#[derive(Deserialize)]
+struct GqlViewer {
+    login: String,
 }
 
 #[derive(Deserialize)]
@@ -737,6 +747,7 @@ struct GqlReviewConnection {
 
 #[derive(Deserialize)]
 struct GqlReviewNode {
+    id: String,
     author: Option<GqlUser>,
     #[serde(default)]
     body: String,
@@ -880,8 +891,16 @@ pub async fn get_pr_details(
             created_at: c.created_at,
         });
     }
+    let viewer_login = data.viewer.login.clone();
+    let mut pending_review_id: Option<String> = None;
     for r in pr.reviews.nodes {
-        if let (Some(submitted_at), false) = (r.submitted_at.clone(), r.body.is_empty() && r.state == "PENDING") {
+        let is_viewer_pending = r.state == "PENDING"
+            && r.author.as_ref().map(|a| a.login == viewer_login).unwrap_or(false);
+        if is_viewer_pending {
+            pending_review_id = Some(r.id.clone());
+            continue;
+        }
+        if let Some(submitted_at) = r.submitted_at.clone() {
             timeline.push(TimelineEntry::Review {
                 author: r.author.map(user_to_author),
                 body: r.body,
@@ -890,6 +909,7 @@ pub async fn get_pr_details(
             });
         }
     }
+    let mut pending_review_threads_count: i64 = 0;
     for t in pr.review_threads.nodes {
         let comments: Vec<ThreadComment> = t
             .comments
@@ -902,6 +922,16 @@ pub async fn get_pr_details(
                 state: c.state,
             })
             .collect();
+        let is_pending_by_viewer = comments
+            .first()
+            .map(|c| {
+                c.state.as_deref() == Some("PENDING")
+                    && c.author.as_ref().map(|a| a.login == viewer_login).unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if is_pending_by_viewer {
+            pending_review_threads_count += 1;
+        }
         let created_at = comments
             .first()
             .map(|c| c.created_at.clone())
@@ -1018,6 +1048,8 @@ pub async fn get_pr_details(
         timeline,
         checks_state,
         checks,
+        pending_review_id,
+        pending_review_threads_count,
     })
 }
 
@@ -1113,6 +1145,129 @@ pub async fn resolve_review_thread(thread_id: String) -> AppResult<()> {
     let client = Client::new(token)?;
     let variables = serde_json::json!({ "input": { "threadId": thread_id } });
     let _: serde_json::Value = client.graphql(RESOLVE_THREAD_MUTATION, variables).await?;
+    Ok(())
+}
+
+const START_REVIEW_MUTATION: &str = r#"
+mutation($input: AddPullRequestReviewInput!) {
+  addPullRequestReview(input: $input) {
+    pullRequestReview { id }
+  }
+}
+"#;
+
+#[derive(Deserialize)]
+struct StartReviewData {
+    #[serde(rename = "addPullRequestReview")]
+    add_pull_request_review: StartReviewPayload,
+}
+
+#[derive(Deserialize)]
+struct StartReviewPayload {
+    #[serde(rename = "pullRequestReview")]
+    pull_request_review: StartReviewNode,
+}
+
+#[derive(Deserialize)]
+struct StartReviewNode {
+    id: String,
+}
+
+#[tauri::command]
+pub async fn start_pr_review(pr_node_id: String) -> AppResult<String> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    let variables = serde_json::json!({
+        "input": {
+            "pullRequestId": pr_node_id,
+            "event": "PENDING",
+        }
+    });
+    let data: StartReviewData = client.graphql(START_REVIEW_MUTATION, variables).await?;
+    Ok(data.add_pull_request_review.pull_request_review.id)
+}
+
+const ADD_THREAD_MUTATION: &str = r#"
+mutation($input: AddPullRequestReviewThreadInput!) {
+  addPullRequestReviewThread(input: $input) {
+    thread { id }
+  }
+}
+"#;
+
+#[tauri::command]
+pub async fn add_pr_review_thread(
+    review_id: String,
+    path: String,
+    line: i64,
+    side: String,
+    start_line: Option<i64>,
+    start_side: Option<String>,
+    body: String,
+) -> AppResult<()> {
+    let body = body.trim().to_string();
+    if body.is_empty() {
+        return Err(AppError::InvalidToken("comentário vazio".into()));
+    }
+    let side_upper = side.to_uppercase();
+    if side_upper != "LEFT" && side_upper != "RIGHT" {
+        return Err(AppError::InvalidToken(format!("side inválido: {side}")));
+    }
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+
+    let mut input = serde_json::Map::new();
+    input.insert("pullRequestReviewId".into(), pr_node_id_value(&review_id));
+    input.insert("path".into(), serde_json::Value::String(path));
+    input.insert("line".into(), serde_json::Value::Number(line.into()));
+    input.insert("side".into(), serde_json::Value::String(side_upper));
+    input.insert("body".into(), serde_json::Value::String(body));
+    if let (Some(sl), Some(ss)) = (start_line, start_side) {
+        let ss_upper = ss.to_uppercase();
+        if ss_upper != "LEFT" && ss_upper != "RIGHT" {
+            return Err(AppError::InvalidToken(format!("start_side inválido: {ss}")));
+        }
+        input.insert("startLine".into(), serde_json::Value::Number(sl.into()));
+        input.insert("startSide".into(), serde_json::Value::String(ss_upper));
+    }
+
+    let variables = serde_json::json!({ "input": input });
+    let _: serde_json::Value = client.graphql(ADD_THREAD_MUTATION, variables).await?;
+    Ok(())
+}
+
+fn pr_node_id_value(s: &str) -> serde_json::Value {
+    serde_json::Value::String(s.to_string())
+}
+
+const SUBMIT_REVIEW_MUTATION: &str = r#"
+mutation($input: SubmitPullRequestReviewInput!) {
+  submitPullRequestReview(input: $input) {
+    pullRequestReview { id state }
+  }
+}
+"#;
+
+#[tauri::command]
+pub async fn submit_pr_review(
+    review_id: String,
+    body: String,
+    event: String,
+) -> AppResult<()> {
+    let event_upper = event.to_uppercase();
+    if !matches!(event_upper.as_str(), "APPROVE" | "COMMENT" | "REQUEST_CHANGES") {
+        return Err(AppError::InvalidToken(format!("event inválido: {event}")));
+    }
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    let variables = serde_json::json!({
+        "input": {
+            "pullRequestReviewId": review_id,
+            "body": body,
+            "event": event_upper,
+        }
+    });
+    let _: serde_json::Value = client.graphql(SUBMIT_REVIEW_MUTATION, variables).await?;
     Ok(())
 }
 
