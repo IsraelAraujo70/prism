@@ -37,19 +37,42 @@ pub async fn sync_once(app: &AppHandle) -> AppResult<Duration> {
             poll_interval,
         } => {
             let count = items.len();
-            {
+            let (was_empty, pushes) = {
                 let state = app.state::<DbState>();
                 let conn = state.0.lock().unwrap();
+                let existing = db::existing_notification_ids(&conn);
+                let was_empty = existing.is_empty();
+
+                let pushes: Vec<(String, String)> = items
+                    .iter()
+                    .filter(|i| {
+                        i.unread
+                            && !existing.contains(&i.id)
+                            && should_push(&i.reason)
+                    })
+                    .map(|i| {
+                        (
+                            push_title(&i.reason).to_string(),
+                            format!("{} — {}", i.repository.full_name, i.subject.title),
+                        )
+                    })
+                    .collect();
+
                 for item in &items {
                     db::upsert_notification(&conn, &row_from_gh(item));
                 }
                 if let Some(lm) = last_modified {
                     db::set_sync_state(&conn, SYNC_KEY_LAST_MODIFIED, &lm);
                 }
-            }
+
+                (was_empty, pushes)
+            };
             log::info!("notifications: synced {count} item(s)");
             tray::update_title(app);
             let _ = app.emit("notifications:changed", ());
+            if !was_empty && !pushes.is_empty() {
+                fire_pushes(app, pushes);
+            }
             Ok(clamp_poll(poll_interval))
         }
     }
@@ -123,4 +146,50 @@ fn row_from_gh(n: &GhNotification) -> NotificationRow {
 
 fn parse_pr_number(url: &str) -> Option<i64> {
     url.rsplit('/').next().and_then(|s| s.parse().ok())
+}
+
+const PUSH_REASONS: &[&str] = &[
+    "review_requested",
+    "mention",
+    "team_mention",
+    "comment",
+    "assign",
+    "state_change",
+    "ci_activity",
+];
+
+fn should_push(reason: &str) -> bool {
+    PUSH_REASONS.contains(&reason)
+}
+
+fn push_title(reason: &str) -> &'static str {
+    match reason {
+        "review_requested" => "Pediram seu review",
+        "mention" | "team_mention" => "Mencionaram você",
+        "comment" => "Novo comentário",
+        "assign" => "Atribuíram a você",
+        "state_change" => "PR mudou de estado",
+        "ci_activity" => "Atualização de CI",
+        _ => "Nova notificação",
+    }
+}
+
+fn fire_pushes(app: &AppHandle, pushes: Vec<(String, String)>) {
+    use tauri_plugin_notification::NotificationExt;
+    let n = pushes.len();
+    if n <= 3 {
+        for (title, body) in pushes {
+            if let Err(e) = app.notification().builder().title(title).body(body).show() {
+                log::warn!("push notification failed: {e}");
+            }
+        }
+    } else if let Err(e) = app
+        .notification()
+        .builder()
+        .title("Prism")
+        .body(format!("Você tem {n} novas notificações no GitHub"))
+        .show()
+    {
+        log::warn!("push notification (summary) failed: {e}");
+    }
 }

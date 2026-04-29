@@ -222,6 +222,14 @@ pub fn list_notifications(conn: &Connection) -> Vec<NotificationRow> {
     .collect()
 }
 
+pub fn existing_notification_ids(conn: &Connection) -> std::collections::HashSet<String> {
+    let mut stmt = conn.prepare("SELECT id FROM notifications").unwrap();
+    stmt.query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+}
+
 pub fn unread_count(conn: &Connection) -> i64 {
     conn.query_row("SELECT COUNT(*) FROM notifications WHERE unread = 1", [], |r| r.get(0))
         .unwrap_or(0)

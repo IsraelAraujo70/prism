@@ -13,6 +13,7 @@ pub fn run() {
   let conn = db::init();
 
   tauri::Builder::default()
+    .plugin(tauri_plugin_notification::init())
     .manage(db::DbState(Mutex::new(conn)))
     .on_window_event(|window, event| {
       if let tauri::WindowEvent::CloseRequested { api, .. } = event {
