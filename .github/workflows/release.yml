@@ -142,6 +142,22 @@ jobs:
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-22.04
     steps:
+      - name: Strip version from asset filenames (stable URLs)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          gh api "repos/$REPO/releases/$RELEASE_ID/assets" --jq '.[] | "\(.id)\t\(.name)"' \
+          | while IFS=$'\t' read -r id name; do
+              new=$(printf '%s' "$name" | sed -E 's/([_-])[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?[._-]?/\1/')
+              if [ "$new" != "$name" ]; then
+                echo "Renaming: $name -> $new"
+                gh api -X PATCH "repos/$REPO/releases/assets/$id" -f name="$new" >/dev/null
+              fi
+            done
+
       - name: Promote tag-triggered release out of draft
         if: needs.prepare-release.outputs.is_tag == 'true'
         env:

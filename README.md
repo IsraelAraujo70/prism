@@ -24,11 +24,12 @@ Prism is a lightweight, cross-platform desktop app (Windows / macOS / Linux) bui
 
 ## Install
 
+> All install URLs below use **version-agnostic** asset names served by GitHub's `latest/download/...` endpoint, so they don't break on the next release.
+
 ### Fedora / RHEL / openSUSE (RPM)
 
 ```bash
-# Latest release
-sudo dnf install https://github.com/IsraelAraujo70/prism/releases/latest/download/Prism-0.1.1-1.x86_64.rpm
+sudo dnf install https://github.com/IsraelAraujo70/prism/releases/latest/download/Prism-x86_64.rpm
 
 # Runtime deps (only if missing)
 sudo dnf install libayatana-appindicator-gtk3 webkit2gtk4.1 gtk3
@@ -39,7 +40,7 @@ sudo dnf install libayatana-appindicator-gtk3 webkit2gtk4.1 gtk3
 ### Debian / Ubuntu (DEB)
 
 ```bash
-curl -L -o /tmp/prism.deb https://github.com/IsraelAraujo70/prism/releases/latest/download/Prism_0.1.1_amd64.deb
+curl -L -o /tmp/prism.deb https://github.com/IsraelAraujo70/prism/releases/latest/download/Prism_amd64.deb
 sudo apt install /tmp/prism.deb
 ```
 
@@ -47,7 +48,7 @@ sudo apt install /tmp/prism.deb
 
 ```bash
 curl -L -o ~/.local/bin/Prism.AppImage \
-  https://github.com/IsraelAraujo70/prism/releases/latest/download/Prism_0.1.1_amd64.AppImage
+  https://github.com/IsraelAraujo70/prism/releases/latest/download/Prism_amd64.AppImage
 chmod +x ~/.local/bin/Prism.AppImage
 ~/.local/bin/Prism.AppImage
 ```
@@ -64,7 +65,7 @@ or right-click the app → *Open* → confirm in the dialog. Code signing will l
 
 ```bash
 curl -L -o /tmp/Prism.dmg \
-  https://github.com/IsraelAraujo70/prism/releases/latest/download/Prism_0.1.1_universal.dmg
+  https://github.com/IsraelAraujo70/prism/releases/latest/download/Prism_universal.dmg
 open /tmp/Prism.dmg
 # drag Prism.app to /Applications, then:
 xattr -cr /Applications/Prism.app
