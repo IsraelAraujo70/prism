@@ -17,12 +17,26 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let separator = PredefinedMenuItem::separator(app)?;
+    let separator1 = PredefinedMenuItem::separator(app)?;
+    let pause_1h = MenuItem::with_id(app, "pause_1h", "Pausar por 1 hora", true, None::<&str>)?;
+    let pause_4h = MenuItem::with_id(app, "pause_4h", "Pausar por 4 horas", true, None::<&str>)?;
+    let resume_item =
+        MenuItem::with_id(app, "resume", "Retomar notificações", true, None::<&str>)?;
+    let separator2 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
-        &[&open_item, &mark_all_item, &separator, &quit_item],
+        &[
+            &open_item,
+            &mark_all_item,
+            &separator1,
+            &pause_1h,
+            &pause_4h,
+            &resume_item,
+            &separator2,
+            &quit_item,
+        ],
     )?;
 
     let icon = app
@@ -55,6 +69,18 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                     }
                 });
             }
+            "pause_1h" => {
+                notifications::pause_for(app, 60);
+                update_title(app);
+            }
+            "pause_4h" => {
+                notifications::pause_for(app, 240);
+                update_title(app);
+            }
+            "resume" => {
+                notifications::resume(app);
+                update_title(app);
+            }
             "quit" => {
                 app.exit(0);
             }
@@ -72,18 +98,22 @@ pub fn update_title(app: &AppHandle) {
         let conn = state.0.lock().unwrap();
         db::unread_count(&conn)
     };
+    let pause_remaining = pause_remaining_label(app);
 
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
 
-    let tooltip = if count == 0 {
-        "Prism".to_string()
-    } else if count == 1 {
-        "Prism — 1 não lida".to_string()
-    } else {
-        format!("Prism — {count} não lidas")
-    };
+    let mut parts: Vec<String> = vec!["Prism".into()];
+    if count == 1 {
+        parts.push("1 não lida".into());
+    } else if count > 1 {
+        parts.push(format!("{count} não lidas"));
+    }
+    if let Some(label) = pause_remaining {
+        parts.push(format!("pausado por mais {label}"));
+    }
+    let tooltip = parts.join(" — ");
     let _ = tray.set_tooltip(Some(&tooltip));
 
     let title = if count > 0 {
@@ -92,6 +122,25 @@ pub fn update_title(app: &AppHandle) {
         None
     };
     let _ = tray.set_title(title.as_deref());
+}
+
+fn pause_remaining_label(app: &AppHandle) -> Option<String> {
+    let until = notifications::paused_until(app)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64;
+    let secs = until - now;
+    if secs <= 0 {
+        return None;
+    }
+    let hours = secs / 3600;
+    let minutes = (secs % 3600) / 60;
+    if hours > 0 {
+        Some(format!("{hours}h{minutes:02}"))
+    } else {
+        Some(format!("{minutes}min"))
+    }
 }
 
 fn toggle_main_window(app: &AppHandle) {

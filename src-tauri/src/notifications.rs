@@ -3,12 +3,47 @@ use crate::db::{self, DbState, NotificationRow};
 use crate::error::{AppError, AppResult};
 use crate::github::{Client, GhNotification, NotificationsFetch};
 use crate::tray;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
 const SYNC_KEY_LAST_MODIFIED: &str = "notifications.last_modified";
+pub const SYNC_KEY_PAUSED_UNTIL: &str = "notifications.paused_until";
 const MIN_POLL_SECS: u64 = 60;
 const MAX_POLL_SECS: u64 = 300;
+const MUTE_REASON: &str = "reason";
+const MUTE_REPO: &str = "repo";
+
+fn now_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+pub fn paused_until(app: &AppHandle) -> Option<i64> {
+    let state = app.state::<DbState>();
+    let conn = state.0.lock().unwrap();
+    db::get_sync_state(&conn, SYNC_KEY_PAUSED_UNTIL)
+        .and_then(|s| s.parse().ok())
+        .filter(|&v: &i64| v > 0)
+}
+
+pub fn is_paused(app: &AppHandle) -> bool {
+    paused_until(app).map(|t| t > now_unix()).unwrap_or(false)
+}
+
+pub fn pause_for(app: &AppHandle, minutes: i64) {
+    let until = now_unix().saturating_add(minutes.saturating_mul(60));
+    let state = app.state::<DbState>();
+    let conn = state.0.lock().unwrap();
+    db::set_sync_state(&conn, SYNC_KEY_PAUSED_UNTIL, &until.to_string());
+}
+
+pub fn resume(app: &AppHandle) {
+    let state = app.state::<DbState>();
+    let conn = state.0.lock().unwrap();
+    db::set_sync_state(&conn, SYNC_KEY_PAUSED_UNTIL, "0");
+}
 
 pub async fn sync_once(app: &AppHandle) -> AppResult<Duration> {
     let Some(token) = auth::load_token()? else {
@@ -49,6 +84,8 @@ pub async fn sync_once(app: &AppHandle) -> AppResult<Duration> {
                         i.unread
                             && !existing.contains(&i.id)
                             && should_push(&i.reason)
+                            && !db::is_muted(&conn, MUTE_REASON, &i.reason)
+                            && !db::is_muted(&conn, MUTE_REPO, &i.repository.full_name)
                     })
                     .map(|i| {
                         (
@@ -70,7 +107,7 @@ pub async fn sync_once(app: &AppHandle) -> AppResult<Duration> {
             log::info!("notifications: synced {count} item(s)");
             tray::update_title(app);
             let _ = app.emit("notifications:changed", ());
-            if !was_empty && !pushes.is_empty() {
+            if !was_empty && !pushes.is_empty() && !is_paused(app) {
                 fire_pushes(app, pushes);
             }
             Ok(clamp_poll(poll_interval))

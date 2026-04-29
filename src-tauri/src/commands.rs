@@ -1167,6 +1167,60 @@ pub async fn sync_notifications_now(app: tauri::AppHandle) -> AppResult<()> {
     notifications::sync_once(&app).await.map(|_| ())
 }
 
+#[derive(Debug, Serialize)]
+pub struct NotificationMutes {
+    pub reasons: Vec<String>,
+    pub repos: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn list_notification_mutes(db: State<'_, DbState>) -> AppResult<NotificationMutes> {
+    let conn = db.0.lock().unwrap();
+    Ok(NotificationMutes {
+        reasons: db::list_mutes(&conn, "reason"),
+        repos: db::list_mutes(&conn, "repo"),
+    })
+}
+
+#[tauri::command]
+pub async fn set_notification_mute(
+    scope_type: String,
+    scope_key: String,
+    muted: bool,
+    db: State<'_, DbState>,
+) -> AppResult<()> {
+    if scope_type != "reason" && scope_type != "repo" {
+        return Err(AppError::InvalidToken(format!(
+            "scope_type inválido: {scope_type}"
+        )));
+    }
+    let conn = db.0.lock().unwrap();
+    db::set_mute(&conn, &scope_type, &scope_key, muted);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn pause_notifications(minutes: i64, app: tauri::AppHandle) -> AppResult<()> {
+    if minutes <= 0 {
+        return Err(AppError::InvalidToken("minutes deve ser > 0".into()));
+    }
+    notifications::pause_for(&app, minutes);
+    crate::tray::update_title(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resume_notifications(app: tauri::AppHandle) -> AppResult<()> {
+    notifications::resume(&app);
+    crate::tray::update_title(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_pause_status(app: tauri::AppHandle) -> AppResult<Option<i64>> {
+    Ok(notifications::paused_until(&app))
+}
+
 // ── GitHub API ─────────────────────────────────────────
 
 #[tauri::command]

@@ -191,6 +191,11 @@ export type PrDetails = {
   checks: CheckEntry[]
 }
 
+export type NotificationMutes = {
+  reasons: string[]
+  repos: string[]
+}
+
 export type NotificationRow = {
   id: string
   repo_full: string
@@ -254,4 +259,21 @@ export const api = {
     invoke<void>('mark_notification_read', { threadId }),
   markAllNotificationsRead: () => invoke<void>('mark_all_notifications_read'),
   syncNotificationsNow: () => invoke<void>('sync_notifications_now'),
+
+  listNotificationMutes: () =>
+    invoke<NotificationMutes>('list_notification_mutes'),
+  setNotificationMute: (
+    scopeType: 'reason' | 'repo',
+    scopeKey: string,
+    muted: boolean,
+  ) =>
+    invoke<void>('set_notification_mute', {
+      scopeType,
+      scopeKey,
+      muted,
+    }),
+  pauseNotifications: (minutes: number) =>
+    invoke<void>('pause_notifications', { minutes }),
+  resumeNotifications: () => invoke<void>('resume_notifications'),
+  getPauseStatus: () => invoke<number | null>('get_pause_status'),
 }

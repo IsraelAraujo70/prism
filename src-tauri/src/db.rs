@@ -79,6 +79,11 @@ pub fn init() -> Connection {
          CREATE TABLE IF NOT EXISTS sync_state (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        );
+         CREATE TABLE IF NOT EXISTS notification_mutes (
+            scope_type TEXT NOT NULL,
+            scope_key  TEXT NOT NULL,
+            PRIMARY KEY (scope_type, scope_key)
         );",
     )
     .expect("failed to create database tables");
@@ -263,4 +268,39 @@ pub fn set_sync_state(conn: &Connection, key: &str, value: &str) {
         params![key, value],
     )
     .unwrap();
+}
+
+pub fn list_mutes(conn: &Connection, scope_type: &str) -> Vec<String> {
+    let mut stmt = conn
+        .prepare("SELECT scope_key FROM notification_mutes WHERE scope_type = ?1")
+        .unwrap();
+    stmt.query_map(params![scope_type], |r| r.get::<_, String>(0))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+}
+
+pub fn is_muted(conn: &Connection, scope_type: &str, scope_key: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM notification_mutes WHERE scope_type = ?1 AND scope_key = ?2",
+        params![scope_type, scope_key],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+pub fn set_mute(conn: &Connection, scope_type: &str, scope_key: &str, muted: bool) {
+    if muted {
+        conn.execute(
+            "INSERT OR IGNORE INTO notification_mutes (scope_type, scope_key) VALUES (?1, ?2)",
+            params![scope_type, scope_key],
+        )
+        .unwrap();
+    } else {
+        conn.execute(
+            "DELETE FROM notification_mutes WHERE scope_type = ?1 AND scope_key = ?2",
+            params![scope_type, scope_key],
+        )
+        .unwrap();
+    }
 }

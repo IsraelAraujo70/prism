@@ -1,13 +1,18 @@
 import {
+  Bell,
+  BellOff,
   Building2,
   Check,
   ExternalLink,
+  GitFork,
   Loader2,
+  PauseCircle,
+  PlayCircle,
   Plus,
   Settings,
   X,
 } from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -21,7 +26,17 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import { api, type OrgRef } from '@/lib/api'
+import {
+  api,
+  type NotificationMutes,
+  type OrgRef,
+  type WatchedRepo,
+} from '@/lib/api'
+import {
+  PUSH_REASONS,
+  iconForReason,
+  labelForReason,
+} from '@/lib/reasons'
 
 type Props = {
   onChanged?: () => void
@@ -37,18 +52,30 @@ export function SettingsDialog({ onChanged }: Props) {
   const [adding, setAdding] = useState(false)
   const [toggling, setToggling] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [mutes, setMutes] = useState<NotificationMutes>({
+    reasons: [],
+    repos: [],
+  })
+  const [watched, setWatched] = useState<WatchedRepo[]>([])
+  const [pauseUntil, setPauseUntil] = useState<number | null>(null)
 
   async function load() {
     setLoading(true)
     try {
-      const [orgs, trackedList, cid] = await Promise.all([
+      const [orgs, trackedList, cid, m, w, pu] = await Promise.all([
         api.getUserOrgs().catch(() => []),
         api.getTrackedOrgs(),
         api.getOauthClientId(),
+        api.listNotificationMutes(),
+        api.getWatchedRepos(),
+        api.getPauseStatus(),
       ])
       setUserOrgs(orgs)
       setTracked(trackedList)
       setClientId(cid)
+      setMutes(m)
+      setWatched(w)
+      setPauseUntil(pu)
     } finally {
       setLoading(false)
     }
@@ -103,6 +130,55 @@ export function SettingsDialog({ onChanged }: Props) {
     }
   }
 
+  const mutedReasons = useMemo(() => new Set(mutes.reasons), [mutes.reasons])
+  const mutedRepos = useMemo(() => new Set(mutes.repos), [mutes.repos])
+  const pauseRemainingMs = useMemo(() => {
+    if (!pauseUntil) return 0
+    const ms = pauseUntil * 1000 - Date.now()
+    return ms > 0 ? ms : 0
+  }, [pauseUntil])
+  const isPaused = pauseRemainingMs > 0
+  const pauseLabel = useMemo(() => {
+    if (!isPaused) return null
+    return new Date(pauseUntil! * 1000).toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }, [pauseUntil, isPaused])
+
+  async function toggleReasonMute(reason: string) {
+    const wasMuted = mutedReasons.has(reason)
+    await api.setNotificationMute('reason', reason, !wasMuted)
+    setMutes((prev) => ({
+      ...prev,
+      reasons: wasMuted
+        ? prev.reasons.filter((r) => r !== reason)
+        : [...prev.reasons, reason],
+    }))
+  }
+
+  async function toggleRepoMute(repoFull: string) {
+    const wasMuted = mutedRepos.has(repoFull)
+    await api.setNotificationMute('repo', repoFull, !wasMuted)
+    setMutes((prev) => ({
+      ...prev,
+      repos: wasMuted
+        ? prev.repos.filter((r) => r !== repoFull)
+        : [...prev.repos, repoFull],
+    }))
+  }
+
+  async function pauseFor(minutes: number) {
+    await api.pauseNotifications(minutes)
+    const pu = await api.getPauseStatus()
+    setPauseUntil(pu)
+  }
+
+  async function resume() {
+    await api.resumeNotifications()
+    setPauseUntil(null)
+  }
+
   function openManageAccess() {
     if (!clientId) return
     api.openUrl(
@@ -126,7 +202,7 @@ export function SettingsDialog({ onChanged }: Props) {
         <DialogHeader className="px-5 pt-5 pb-3">
           <DialogTitle>Configurações</DialogTitle>
           <DialogDescription>
-            Gerencie organizações para incluir nos repos rastreáveis.
+            Notificações, organizações e repositórios.
           </DialogDescription>
         </DialogHeader>
 
@@ -136,6 +212,118 @@ export function SettingsDialog({ onChanged }: Props) {
               {error}
             </p>
           )}
+
+          {/* Notificações */}
+          <section className="mb-6">
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+              <Bell className="size-4 text-muted-foreground" />
+              Notificações
+            </h3>
+
+            <div className="mb-4 flex items-center gap-2 rounded-md border bg-card px-3 py-2">
+              {isPaused ? (
+                <>
+                  <PauseCircle className="size-4 shrink-0 text-primary" />
+                  <span className="flex-1 text-xs">
+                    Pausadas até{' '}
+                    <span className="font-medium">{pauseLabel}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={resume}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <PlayCircle className="size-3.5" />
+                    Retomar
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Bell className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 text-xs text-muted-foreground">
+                    Pausar por
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => pauseFor(60)}
+                    className="rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    1h
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => pauseFor(240)}
+                    className="rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    4h
+                  </button>
+                </>
+              )}
+            </div>
+
+            <p className="mb-2 text-xs text-muted-foreground">
+              Tipos de evento que disparam push nativo:
+            </p>
+            <div className="mb-4 flex flex-wrap gap-1.5">
+              {PUSH_REASONS.map((reason) => {
+                const Icon = iconForReason(reason)
+                const muted = mutedReasons.has(reason)
+                return (
+                  <button
+                    key={reason}
+                    type="button"
+                    onClick={() => toggleReasonMute(reason)}
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
+                      muted
+                        ? 'border-dashed border-border text-muted-foreground/50 line-through hover:bg-accent'
+                        : 'border-border bg-card hover:bg-accent'
+                    }`}
+                  >
+                    <Icon className="size-3" />
+                    {labelForReason(reason)}
+                  </button>
+                )
+              })}
+            </div>
+
+            <p className="mb-2 text-xs text-muted-foreground">
+              Repositórios silenciados:
+            </p>
+            <div className="flex flex-col gap-1">
+              {watched.length === 0 && (
+                <p className="rounded-md border border-dashed border-border px-3 py-3 text-center text-xs text-muted-foreground">
+                  Nenhum repositório observado.
+                </p>
+              )}
+              {watched.map((repo) => {
+                const muted = mutedRepos.has(repo.full_name)
+                return (
+                  <button
+                    key={repo.id}
+                    type="button"
+                    onClick={() => toggleRepoMute(repo.full_name)}
+                    className="group flex w-full items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-left transition-colors hover:bg-accent"
+                  >
+                    <GitFork className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="flex-1 truncate text-sm">
+                      {repo.full_name}
+                    </span>
+                    {muted ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <BellOff className="size-3" />
+                        Silenciado
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                        <Bell className="size-3" />
+                        Ativo
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </section>
 
           {/* Suas organizações */}
           <section className="mb-6">

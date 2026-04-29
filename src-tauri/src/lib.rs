@@ -63,6 +63,11 @@ pub fn run() {
       commands::mark_notification_read,
       commands::mark_all_notifications_read,
       commands::sync_notifications_now,
+      commands::list_notification_mutes,
+      commands::set_notification_mute,
+      commands::pause_notifications,
+      commands::resume_notifications,
+      commands::get_pause_status,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

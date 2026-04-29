@@ -1,22 +1,15 @@
 import {
-  Activity,
-  AtSign,
   Bell,
   CheckCheck,
   ExternalLink,
-  GitMerge,
-  GitPullRequest,
   Inbox as InboxIcon,
-  MessageSquare,
   RefreshCw,
-  ShieldAlert,
-  UserPlus,
-  type LucideIcon,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, type NotificationRow, type PullRequestRef } from '@/lib/api'
+import { iconForReason, labelForReason } from '@/lib/reasons'
 import { useNotifications } from '@/lib/use-notifications'
 
 type Props = {
@@ -260,42 +253,6 @@ function htmlUrlFromSubject(item: NotificationRow): string | null {
   return item.subject_url
     .replace('https://api.github.com/repos/', 'https://github.com/')
     .replace('/pulls/', '/pull/')
-}
-
-const REASON_LABELS: Record<string, string> = {
-  review_requested: 'Pediram seu review',
-  mention: 'Mencionado',
-  team_mention: 'Time mencionado',
-  comment: 'Comentário',
-  author: 'Autor',
-  assign: 'Atribuído',
-  state_change: 'Mudança de estado',
-  ci_activity: 'CI',
-  subscribed: 'Inscrito',
-  push: 'Novo commit',
-  security_alert: 'Alerta de segurança',
-  manual: 'Manual',
-}
-
-function labelForReason(reason: string): string {
-  return REASON_LABELS[reason] ?? reason.replace(/_/g, ' ')
-}
-
-const REASON_ICONS: Record<string, LucideIcon> = {
-  review_requested: GitPullRequest,
-  mention: AtSign,
-  team_mention: AtSign,
-  comment: MessageSquare,
-  author: GitPullRequest,
-  assign: UserPlus,
-  state_change: GitMerge,
-  ci_activity: Activity,
-  push: GitMerge,
-  security_alert: ShieldAlert,
-}
-
-function iconForReason(reason: string): LucideIcon {
-  return REASON_ICONS[reason] ?? Bell
 }
 
 function relativeTime(iso: string): string {
