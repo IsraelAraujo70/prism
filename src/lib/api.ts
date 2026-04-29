@@ -189,6 +189,29 @@ export type PrDetails = {
   timeline: TimelineEntry[]
   checks_state: string | null
   checks: CheckEntry[]
+  pending_review_id: string | null
+  pending_review_threads_count: number
+}
+
+export type ReviewSide = 'LEFT' | 'RIGHT'
+export type ReviewEvent = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES'
+
+export type NotificationMutes = {
+  reasons: string[]
+  repos: string[]
+}
+
+export type NotificationRow = {
+  id: string
+  repo_full: string
+  subject_type: string
+  subject_url: string | null
+  pr_number: number | null
+  reason: string
+  title: string
+  unread: boolean
+  updated_at: string
+  last_seen_at: string
 }
 
 export const api = {
@@ -234,4 +257,51 @@ export const api = {
     invoke<void>('resolve_review_thread', { threadId }),
   unresolveReviewThread: (threadId: string) =>
     invoke<void>('unresolve_review_thread', { threadId }),
+
+  startPrReview: (prNodeId: string) =>
+    invoke<string>('start_pr_review', { prNodeId }),
+  addPrReviewThread: (args: {
+    reviewId: string
+    path: string
+    line: number
+    side: ReviewSide
+    startLine?: number | null
+    startSide?: ReviewSide | null
+    body: string
+  }) =>
+    invoke<void>('add_pr_review_thread', {
+      reviewId: args.reviewId,
+      path: args.path,
+      line: args.line,
+      side: args.side,
+      startLine: args.startLine ?? null,
+      startSide: args.startSide ?? null,
+      body: args.body,
+    }),
+  submitPrReview: (reviewId: string, body: string, event: ReviewEvent) =>
+    invoke<void>('submit_pr_review', { reviewId, body, event }),
+
+  listNotifications: () => invoke<NotificationRow[]>('list_notifications'),
+  unreadNotificationCount: () => invoke<number>('unread_notification_count'),
+  markNotificationRead: (threadId: string) =>
+    invoke<void>('mark_notification_read', { threadId }),
+  markAllNotificationsRead: () => invoke<void>('mark_all_notifications_read'),
+  syncNotificationsNow: () => invoke<void>('sync_notifications_now'),
+
+  listNotificationMutes: () =>
+    invoke<NotificationMutes>('list_notification_mutes'),
+  setNotificationMute: (
+    scopeType: 'reason' | 'repo',
+    scopeKey: string,
+    muted: boolean,
+  ) =>
+    invoke<void>('set_notification_mute', {
+      scopeType,
+      scopeKey,
+      muted,
+    }),
+  pauseNotifications: (minutes: number) =>
+    invoke<void>('pause_notifications', { minutes }),
+  resumeNotifications: () => invoke<void>('resume_notifications'),
+  getPauseStatus: () => invoke<number | null>('get_pause_status'),
 }

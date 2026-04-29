@@ -3,6 +3,8 @@ mod commands;
 mod db;
 mod error;
 mod github;
+mod notifications;
+mod tray;
 
 use std::sync::Mutex;
 
@@ -11,7 +13,16 @@ pub fn run() {
   let conn = db::init();
 
   tauri::Builder::default()
+    .plugin(tauri_plugin_notification::init())
     .manage(db::DbState(Mutex::new(conn)))
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if window.label() == "main" {
+          let _ = window.hide();
+          api.prevent_close();
+        }
+      }
+    })
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -20,6 +31,8 @@ pub fn run() {
             .build(),
         )?;
       }
+      tray::build(app.handle())?;
+      notifications::spawn_loop(app.handle().clone());
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
@@ -45,6 +58,19 @@ pub fn run() {
       commands::add_review_thread_reply,
       commands::resolve_review_thread,
       commands::unresolve_review_thread,
+      commands::start_pr_review,
+      commands::add_pr_review_thread,
+      commands::submit_pr_review,
+      commands::list_notifications,
+      commands::unread_notification_count,
+      commands::mark_notification_read,
+      commands::mark_all_notifications_read,
+      commands::sync_notifications_now,
+      commands::list_notification_mutes,
+      commands::set_notification_mute,
+      commands::pause_notifications,
+      commands::resume_notifications,
+      commands::get_pause_status,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

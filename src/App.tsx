@@ -2,6 +2,8 @@ import { Loader2, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import { Dashboard } from '@/components/dashboard'
+import { Inbox } from '@/components/inbox'
+import { InboxSidebarLink } from '@/components/inbox-sidebar-link'
 import { LoginForm } from '@/components/login-form'
 import { PrViewer } from '@/components/pr-viewer'
 import { RepoList } from '@/components/repo-list'
@@ -29,6 +31,7 @@ function App() {
   )
   const [selectedRepo, setSelectedRepo] = useState<WatchedRepo | null>(null)
   const [selectedPr, setSelectedPr] = useState<PullRequestRef | null>(null)
+  const [inboxOpen, setInboxOpen] = useState(false)
 
   useEffect(() => {
     api
@@ -143,13 +146,22 @@ function App() {
           </div>
         )}
 
+        <InboxSidebarLink
+          collapsed={collapsed}
+          active={inboxOpen}
+          onClick={() => {
+            setInboxOpen(true)
+            setSelectedPr(null)
+          }}
+        />
         <RepoList
           collapsed={collapsed}
           settingsSlot={<SettingsDialog />}
-          selectedId={selectedRepo?.id ?? null}
+          selectedId={inboxOpen ? null : selectedRepo?.id ?? null}
           onSelectRepo={(repo) => {
             setSelectedRepo(repo)
             setSelectedPr(null)
+            setInboxOpen(false)
           }}
           onRepoRemoved={(id) => {
             if (selectedRepo?.id === id) setSelectedRepo(null)
@@ -160,6 +172,8 @@ function App() {
 
       {selectedPr ? (
         <PrViewer pr={selectedPr} onBack={() => setSelectedPr(null)} />
+      ) : inboxOpen ? (
+        <Inbox onSelectPr={setSelectedPr} />
       ) : (
         <Dashboard
           repo={selectedRepo}

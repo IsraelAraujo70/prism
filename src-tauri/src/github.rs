@@ -68,6 +68,40 @@ pub struct PrFile {
     pub previous_filename: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct GhMinRepo {
+    pub full_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GhNotificationSubject {
+    pub title: String,
+    pub url: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GhNotification {
+    pub id: String,
+    pub repository: GhMinRepo,
+    pub subject: GhNotificationSubject,
+    pub reason: String,
+    pub unread: bool,
+    pub updated_at: String,
+}
+
+pub enum NotificationsFetch {
+    NotModified {
+        poll_interval: u64,
+    },
+    Fresh {
+        items: Vec<GhNotification>,
+        last_modified: Option<String>,
+        poll_interval: u64,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PullRequestRef {
     pub id: i64,
@@ -274,6 +308,78 @@ impl Client {
             return Ok(Vec::new());
         }
         Ok(res.error_for_status()?.json().await?)
+    }
+
+    pub async fn list_notifications(
+        &self,
+        if_modified_since: Option<&str>,
+    ) -> AppResult<NotificationsFetch> {
+        let mut req = self.request(reqwest::Method::GET, "/notifications");
+        if let Some(value) = if_modified_since {
+            req = req.header(reqwest::header::IF_MODIFIED_SINCE, value);
+        }
+        let res = req.send().await?;
+
+        let poll_interval = res
+            .headers()
+            .get("x-poll-interval")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(60);
+
+        if res.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok(NotificationsFetch::NotModified { poll_interval });
+        }
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::InvalidToken(
+                "GitHub rejected the token (401)".into(),
+            ));
+        }
+
+        let last_modified = res
+            .headers()
+            .get(reqwest::header::LAST_MODIFIED)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let items: Vec<GhNotification> = res.error_for_status()?.json().await?;
+        Ok(NotificationsFetch::Fresh {
+            items,
+            last_modified,
+            poll_interval,
+        })
+    }
+
+    pub async fn mark_notification_thread_read(&self, thread_id: &str) -> AppResult<()> {
+        let res = self
+            .request(
+                reqwest::Method::PATCH,
+                &format!("/notifications/threads/{thread_id}"),
+            )
+            .send()
+            .await?;
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::InvalidToken(
+                "GitHub rejected the token (401)".into(),
+            ));
+        }
+        res.error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn mark_all_notifications_read(&self) -> AppResult<()> {
+        let res = self
+            .request(reqwest::Method::PUT, "/notifications")
+            .json(&serde_json::json!({ "read": true }))
+            .send()
+            .await?;
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AppError::InvalidToken(
+                "GitHub rejected the token (401)".into(),
+            ));
+        }
+        res.error_for_status()?;
+        Ok(())
     }
 
     pub async fn graphql<T: serde::de::DeserializeOwned>(

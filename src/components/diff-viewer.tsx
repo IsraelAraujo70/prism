@@ -27,12 +27,13 @@ import {
   useState,
 } from 'react'
 
+import { CommentEditor } from '@/components/comment-editor'
 import { HighlightedText } from '@/components/highlighted-text'
 import {
   ReviewThreadCard,
   type ReviewThread,
 } from '@/components/review-thread-card'
-import { api, type PrFile } from '@/lib/api'
+import { api, type PrFile, type ReviewSide } from '@/lib/api'
 import {
   parseDiff,
   type DiffLine,
@@ -48,11 +49,81 @@ type ViewMode = 'unified' | 'split'
 
 type Props = {
   prKey: string
+  prNodeId: string
+  pendingReviewId: string | null
   files: PrFile[]
   additions: number
   deletions: number
   threads: ReviewThread[]
   onAfterMutation: () => Promise<void>
+}
+
+type Selection = {
+  file: string
+  side: ReviewSide
+  anchorLine: number
+  endLine: number
+}
+
+type LineAddr = { side: ReviewSide; lineNo: number }
+
+export type RowSelectionApi = {
+  selection: Selection | null
+  onRowMouseDown: (file: string, addr: LineAddr) => void
+  onRowMouseEnter: (file: string, addr: LineAddr) => void
+}
+
+export type AddCommentArgs = {
+  file: string
+  side: ReviewSide
+  line: number
+  startLine: number | null
+  startSide: ReviewSide | null
+  body: string
+}
+
+export function lineAddrUnified(line: DiffLine): LineAddr | null {
+  if (line.kind === 'del') {
+    return line.old != null ? { side: 'LEFT', lineNo: line.old } : null
+  }
+  return line.new != null ? { side: 'RIGHT', lineNo: line.new } : null
+}
+
+export function lineAddrSplit(
+  line: DiffLine,
+  displaySide: 'left' | 'right',
+): LineAddr | null {
+  if (displaySide === 'left') {
+    if (line.kind === 'add') return null
+    return line.old != null ? { side: 'LEFT', lineNo: line.old } : null
+  }
+  if (line.kind === 'del') return null
+  return line.new != null ? { side: 'RIGHT', lineNo: line.new } : null
+}
+
+function isAddrInSelection(
+  file: string,
+  addr: LineAddr | null,
+  sel: Selection | null,
+): boolean {
+  if (!sel || !addr) return false
+  if (sel.file !== file) return false
+  if (sel.side !== addr.side) return false
+  const min = Math.min(sel.anchorLine, sel.endLine)
+  const max = Math.max(sel.anchorLine, sel.endLine)
+  return addr.lineNo >= min && addr.lineNo <= max
+}
+
+function isAddrAtSelectionEnd(
+  file: string,
+  addr: LineAddr | null,
+  sel: Selection | null,
+): boolean {
+  if (!sel || !addr) return false
+  if (sel.file !== file) return false
+  if (sel.side !== addr.side) return false
+  const max = Math.max(sel.anchorLine, sel.endLine)
+  return addr.lineNo === max
 }
 
 const VIEW_MODE_KEY = 'prism.diff-view-mode'
@@ -65,6 +136,8 @@ const SMALL_FILE_THRESHOLD = 80
 
 export function DiffViewer({
   prKey,
+  prNodeId,
+  pendingReviewId,
   files,
   additions,
   deletions,
@@ -82,6 +155,75 @@ export function DiffViewer({
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(() =>
     initialOpenMap(files, readViewed(prKey)),
   )
+  const [selection, setSelection] = useState<Selection | null>(null)
+  const isMouseDownRef = useRef(false)
+
+  useEffect(() => {
+    setSelection(null)
+  }, [prKey])
+
+  useEffect(() => {
+    function up() {
+      isMouseDownRef.current = false
+    }
+    function key(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setSelection(null)
+      }
+    }
+    document.addEventListener('mouseup', up)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mouseup', up)
+      document.removeEventListener('keydown', key)
+    }
+  }, [])
+
+  const onRowMouseDown = useCallback(
+    (file: string, addr: LineAddr) => {
+      isMouseDownRef.current = true
+      setSelection({
+        file,
+        side: addr.side,
+        anchorLine: addr.lineNo,
+        endLine: addr.lineNo,
+      })
+    },
+    [],
+  )
+
+  const onRowMouseEnter = useCallback((file: string, addr: LineAddr) => {
+    if (!isMouseDownRef.current) return
+    setSelection((prev) => {
+      if (!prev) return prev
+      if (prev.file !== file) return prev
+      if (prev.side !== addr.side) return prev
+      return { ...prev, endLine: addr.lineNo }
+    })
+  }, [])
+
+  const submitComment = useCallback(
+    async (args: AddCommentArgs) => {
+      let reviewId = pendingReviewId
+      if (!reviewId) {
+        reviewId = await api.startPrReview(prNodeId)
+      }
+      await api.addPrReviewThread({
+        reviewId,
+        path: args.file,
+        line: args.line,
+        side: args.side,
+        startLine: args.startLine,
+        startSide: args.startSide,
+        body: args.body,
+      })
+      setSelection(null)
+      await onAfterMutation()
+    },
+    [pendingReviewId, prNodeId, onAfterMutation],
+  )
+
+  const cancelSelection = useCallback(() => setSelection(null), [])
 
   useEffect(() => {
     setViewed(readViewed(prKey))
@@ -291,6 +433,11 @@ export function DiffViewer({
                   onToggleOpen={() => setOpen(f.filename, !isOpen)}
                   onToggleViewed={() => toggleViewed(f)}
                   setRef={(el) => setFileRef(f.filename, el)}
+                  selection={selection}
+                  onRowMouseDown={onRowMouseDown}
+                  onRowMouseEnter={onRowMouseEnter}
+                  onSubmitComment={submitComment}
+                  onCancelSelection={cancelSelection}
                 />
               )
             })}
@@ -447,6 +594,11 @@ function FileBlock({
   onToggleOpen,
   onToggleViewed,
   setRef,
+  selection,
+  onRowMouseDown,
+  onRowMouseEnter,
+  onSubmitComment,
+  onCancelSelection,
 }: {
   file: PrFile
   viewMode: ViewMode
@@ -458,6 +610,11 @@ function FileBlock({
   onToggleOpen: () => void
   onToggleViewed: () => void
   setRef: (el: HTMLLIElement | null) => void
+  selection: Selection | null
+  onRowMouseDown: (file: string, addr: LineAddr) => void
+  onRowMouseEnter: (file: string, addr: LineAddr) => void
+  onSubmitComment: (args: AddCommentArgs) => Promise<void>
+  onCancelSelection: () => void
 }) {
   const displayName =
     file.previous_filename && file.previous_filename !== file.filename
@@ -529,6 +686,11 @@ function FileBlock({
             wrap={wrap}
             threads={threads}
             onAfterMutation={onAfterMutation}
+            selection={selection}
+            onRowMouseDown={onRowMouseDown}
+            onRowMouseEnter={onRowMouseEnter}
+            onSubmitComment={onSubmitComment}
+            onCancelSelection={onCancelSelection}
           />
         </div>
       )}
@@ -542,12 +704,22 @@ function FileBody({
   wrap,
   threads,
   onAfterMutation,
+  selection,
+  onRowMouseDown,
+  onRowMouseEnter,
+  onSubmitComment,
+  onCancelSelection,
 }: {
   file: PrFile
   viewMode: ViewMode
   wrap: boolean
   threads: ReviewThread[]
   onAfterMutation: () => Promise<void>
+  selection: Selection | null
+  onRowMouseDown: (file: string, addr: LineAddr) => void
+  onRowMouseEnter: (file: string, addr: LineAddr) => void
+  onSubmitComment: (args: AddCommentArgs) => Promise<void>
+  onCancelSelection: () => void
 }) {
   if (!file.patch) {
     return (
@@ -587,6 +759,11 @@ function FileBody({
       wrap={wrap}
       threads={threads}
       onAfterMutation={onAfterMutation}
+      selection={selection}
+      onRowMouseDown={onRowMouseDown}
+      onRowMouseEnter={onRowMouseEnter}
+      onSubmitComment={onSubmitComment}
+      onCancelSelection={onCancelSelection}
     />
   )
 }
@@ -630,6 +807,11 @@ function DiffContent({
   wrap,
   threads,
   onAfterMutation,
+  selection,
+  onRowMouseDown,
+  onRowMouseEnter,
+  onSubmitComment,
+  onCancelSelection,
 }: {
   filename: string
   patch: string
@@ -638,6 +820,11 @@ function DiffContent({
   wrap: boolean
   threads: ReviewThread[]
   onAfterMutation: () => Promise<void>
+  selection: Selection | null
+  onRowMouseDown: (file: string, addr: LineAddr) => void
+  onRowMouseEnter: (file: string, addr: LineAddr) => void
+  onSubmitComment: (args: AddCommentArgs) => Promise<void>
+  onCancelSelection: () => void
 }) {
   const hunks = useMemo(() => parseDiff(patch), [patch])
   const totalLines = useMemo(
@@ -705,19 +892,31 @@ function DiffContent({
     <>
       {viewMode === 'split' ? (
         <SplitDiff
+          file={filename}
           hunks={hunks}
           wrap={wrap}
           highlightLine={highlightLine}
           lineThreads={lineThreads}
           onAfterMutation={onAfterMutation}
+          selection={selection}
+          onRowMouseDown={onRowMouseDown}
+          onRowMouseEnter={onRowMouseEnter}
+          onSubmitComment={onSubmitComment}
+          onCancelSelection={onCancelSelection}
         />
       ) : (
         <UnifiedDiff
+          file={filename}
           hunks={hunks}
           wrap={wrap}
           highlightLine={highlightLine}
           lineThreads={lineThreads}
           onAfterMutation={onAfterMutation}
+          selection={selection}
+          onRowMouseDown={onRowMouseDown}
+          onRowMouseEnter={onRowMouseEnter}
+          onSubmitComment={onSubmitComment}
+          onCancelSelection={onCancelSelection}
         />
       )}
       {orphaned.length > 0 && (
@@ -764,17 +963,29 @@ function lineMatchesThread(line: DiffLine, t: ReviewThread): boolean {
 }
 
 function UnifiedDiff({
+  file,
   hunks,
   wrap,
   highlightLine,
   lineThreads,
   onAfterMutation,
+  selection,
+  onRowMouseDown,
+  onRowMouseEnter,
+  onSubmitComment,
+  onCancelSelection,
 }: {
+  file: string
   hunks: Hunk[]
   wrap: boolean
   highlightLine: HighlightLineFn
   lineThreads: Map<DiffLine, ReviewThread[]>
   onAfterMutation: () => Promise<void>
+  selection: Selection | null
+  onRowMouseDown: (file: string, addr: LineAddr) => void
+  onRowMouseEnter: (file: string, addr: LineAddr) => void
+  onSubmitComment: (args: AddCommentArgs) => Promise<void>
+  onCancelSelection: () => void
 }) {
   return (
     <div className="overflow-x-auto">
@@ -797,13 +1008,42 @@ function UnifiedDiff({
               </tr>
               {h.lines.map((line, j) => {
                 const ts = lineThreads.get(line)
+                const addr = lineAddrUnified(line)
+                const selected = isAddrInSelection(file, addr, selection)
+                const isEnd = isAddrAtSelectionEnd(file, addr, selection)
                 return (
                   <Fragment key={j}>
                     <UnifiedRow
                       line={line}
                       wrap={wrap}
                       highlightLine={highlightLine}
+                      selected={selected}
+                      onMouseDown={
+                        addr
+                          ? () => onRowMouseDown(file, addr)
+                          : undefined
+                      }
+                      onMouseEnter={
+                        addr
+                          ? () => onRowMouseEnter(file, addr)
+                          : undefined
+                      }
                     />
+                    {isEnd && selection && (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="bg-background/40 px-4 py-3 font-sans"
+                        >
+                          <CommentEditorRow
+                            selection={selection}
+                            file={file}
+                            onSubmit={onSubmitComment}
+                            onCancel={onCancelSelection}
+                          />
+                        </td>
+                      </tr>
+                    )}
                     {ts && ts.length > 0 && (
                       <tr>
                         <td
@@ -833,10 +1073,16 @@ function UnifiedRow({
   line,
   wrap,
   highlightLine,
+  selected,
+  onMouseDown,
+  onMouseEnter,
 }: {
   line: DiffLine
   wrap: boolean
   highlightLine: HighlightLineFn
+  selected: boolean
+  onMouseDown?: () => void
+  onMouseEnter?: () => void
 }) {
   const tone =
     line.kind === 'add'
@@ -854,9 +1100,19 @@ function UnifiedRow({
   const oldNum = line.kind === 'add' ? '' : line.old
   const newNum = line.kind === 'del' ? '' : line.new
   const wrapClass = wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'
+  const selectionTone = selected ? 'bg-primary/15 ring-1 ring-inset ring-primary/30' : ''
 
   return (
-    <tr className={tone}>
+    <tr
+      className={`${tone} ${selectionTone} ${onMouseDown ? 'cursor-cell' : ''}`}
+      onMouseDown={(e) => {
+        if (onMouseDown && e.button === 0) {
+          e.preventDefault()
+          onMouseDown()
+        }
+      }}
+      onMouseEnter={onMouseEnter}
+    >
       <td className="w-12 select-none border-r border-border/40 px-2 align-top text-right text-[11px] tabular-nums text-muted-foreground/50">
         {oldNum}
       </td>
@@ -871,18 +1127,63 @@ function UnifiedRow({
   )
 }
 
+function CommentEditorRow({
+  selection,
+  file,
+  onSubmit,
+  onCancel,
+}: {
+  selection: Selection
+  file: string
+  onSubmit: (args: AddCommentArgs) => Promise<void>
+  onCancel: () => void
+}) {
+  const start = Math.min(selection.anchorLine, selection.endLine)
+  const end = Math.max(selection.anchorLine, selection.endLine)
+  const range = start === end ? `linha ${end}` : `linhas ${start}–${end}`
+  const sideLabel = selection.side === 'RIGHT' ? 'novo' : 'antigo'
+  return (
+    <CommentEditor
+      contextLabel={`Comentando em ${file} · ${range} (${sideLabel})`}
+      onSubmit={async (body) => {
+        await onSubmit({
+          file,
+          side: selection.side,
+          line: end,
+          startLine: start === end ? null : start,
+          startSide: start === end ? null : selection.side,
+          body,
+        })
+      }}
+      onCancel={onCancel}
+    />
+  )
+}
+
 function SplitDiff({
+  file,
   hunks,
   wrap,
   highlightLine,
   lineThreads,
   onAfterMutation,
+  selection,
+  onRowMouseDown,
+  onRowMouseEnter,
+  onSubmitComment,
+  onCancelSelection,
 }: {
+  file: string
   hunks: Hunk[]
   wrap: boolean
   highlightLine: HighlightLineFn
   lineThreads: Map<DiffLine, ReviewThread[]>
   onAfterMutation: () => Promise<void>
+  selection: Selection | null
+  onRowMouseDown: (file: string, addr: LineAddr) => void
+  onRowMouseEnter: (file: string, addr: LineAddr) => void
+  onSubmitComment: (args: AddCommentArgs) => Promise<void>
+  onCancelSelection: () => void
 }) {
   return (
     <div className="overflow-x-auto">
@@ -922,13 +1223,41 @@ function SplitDiff({
                     collected.push(t)
                   }
                 }
+                const leftAddr = row.left
+                  ? lineAddrSplit(row.left, 'left')
+                  : null
+                const rightAddr = row.right
+                  ? lineAddrSplit(row.right, 'right')
+                  : null
+                const showEditor =
+                  isAddrAtSelectionEnd(file, leftAddr, selection) ||
+                  isAddrAtSelectionEnd(file, rightAddr, selection)
                 return (
                   <Fragment key={j}>
                     <SplitRow
+                      file={file}
                       row={row}
                       wrap={wrap}
                       highlightLine={highlightLine}
+                      selection={selection}
+                      onRowMouseDown={onRowMouseDown}
+                      onRowMouseEnter={onRowMouseEnter}
                     />
+                    {showEditor && selection && (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="bg-background/40 px-4 py-3 font-sans"
+                        >
+                          <CommentEditorRow
+                            selection={selection}
+                            file={file}
+                            onSubmit={onSubmitComment}
+                            onCancel={onCancelSelection}
+                          />
+                        </td>
+                      </tr>
+                    )}
                     {collected.length > 0 && (
                       <tr>
                         <td
@@ -986,42 +1315,66 @@ function pairLines(lines: DiffLine[]): SbsRow[] {
 }
 
 function SplitRow({
+  file,
   row,
   wrap,
   highlightLine,
+  selection,
+  onRowMouseDown,
+  onRowMouseEnter,
 }: {
+  file: string
   row: SbsRow
   wrap: boolean
   highlightLine: HighlightLineFn
+  selection: Selection | null
+  onRowMouseDown: (file: string, addr: LineAddr) => void
+  onRowMouseEnter: (file: string, addr: LineAddr) => void
 }) {
   return (
     <tr>
       <SplitCell
+        file={file}
         line={row.left}
         side="left"
         wrap={wrap}
         highlightLine={highlightLine}
+        selection={selection}
+        onRowMouseDown={onRowMouseDown}
+        onRowMouseEnter={onRowMouseEnter}
       />
       <SplitCell
+        file={file}
         line={row.right}
         side="right"
         wrap={wrap}
         highlightLine={highlightLine}
+        selection={selection}
+        onRowMouseDown={onRowMouseDown}
+        onRowMouseEnter={onRowMouseEnter}
       />
     </tr>
   )
 }
 
 function SplitCell({
+  file,
   line,
   side,
   wrap,
   highlightLine,
+  selection,
+  onRowMouseDown,
+  onRowMouseEnter,
 }: {
+  file: string
   line: DiffLine | null
   side: 'left' | 'right'
   wrap: boolean
   highlightLine: HighlightLineFn
+  selection: Selection | null
+  onRowMouseDown: (file: string, addr: LineAddr) => void
+  onRowMouseEnter: (file: string, addr: LineAddr) => void
 }) {
   if (!line) {
     return (
@@ -1063,15 +1416,36 @@ function SplitCell({
   const innerClass = wrap
     ? 'whitespace-pre-wrap break-all'
     : 'overflow-hidden whitespace-pre'
+  const addr = lineAddrSplit(line, side)
+  const selected = isAddrInSelection(file, addr, selection)
+  const selectionTone = selected ? 'bg-primary/15 ring-1 ring-inset ring-primary/30' : ''
+  const cellHandlers = addr
+    ? {
+        onMouseDown: (e: React.MouseEvent<HTMLTableCellElement>) => {
+          if (e.button === 0) {
+            e.preventDefault()
+            onRowMouseDown(file, addr)
+          }
+        },
+        onMouseEnter: () => onRowMouseEnter(file, addr),
+        className: 'cursor-cell',
+      }
+    : { className: '' }
 
   return (
     <>
       <td
-        className={`w-12 select-none border-r border-border/40 px-2 align-top text-right text-[11px] tabular-nums text-muted-foreground/50 ${tone}`}
+        className={`w-12 select-none border-r border-border/40 px-2 align-top text-right text-[11px] tabular-nums text-muted-foreground/50 ${tone} ${selectionTone} ${cellHandlers.className}`}
+        onMouseDown={cellHandlers.onMouseDown}
+        onMouseEnter={cellHandlers.onMouseEnter}
       >
         {num}
       </td>
-      <td className={`px-3 align-top text-foreground/90 ${tone}`}>
+      <td
+        className={`px-3 align-top text-foreground/90 ${tone} ${selectionTone} ${cellHandlers.className}`}
+        onMouseDown={cellHandlers.onMouseDown}
+        onMouseEnter={cellHandlers.onMouseEnter}
+      >
         <div className={innerClass}>
           <span className={`mr-2 select-none ${signTone}`}>{sign}</span>
           <HighlightedText text={line.text} highlightLine={highlightLine} />
