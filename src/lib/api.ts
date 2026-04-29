@@ -104,6 +104,13 @@ export type PrLabel = {
   color: string
 }
 
+export type ThreadComment = {
+  author: PrAuthor | null
+  body: string
+  created_at: string
+  state: string | null
+}
+
 export type TimelineEntry =
   | {
       kind: 'comment'
@@ -118,9 +125,45 @@ export type TimelineEntry =
       state: string
       submitted_at: string
     }
+  | {
+      kind: 'review_thread'
+      id: string
+      path: string
+      line: number | null
+      is_resolved: boolean
+      is_outdated: boolean
+      comments: ThreadComment[]
+      created_at: string
+    }
+
+export type CheckEntry = {
+  name: string
+  status: string
+  conclusion: string | null
+  url: string | null
+  started_at: string | null
+  completed_at: string | null
+  app_name: string | null
+  app_logo_url: string | null
+  workflow_name: string | null
+  description: string | null
+}
+
+export type PrFile = {
+  sha: string
+  filename: string
+  status: string
+  additions: number
+  deletions: number
+  changes: number
+  blob_url: string | null
+  patch: string | null
+  previous_filename: string | null
+}
 
 export type PrDetails = {
   id: number
+  node_id: string
   number: number
   title: string
   body: string
@@ -145,6 +188,7 @@ export type PrDetails = {
   review_requests: PrAuthor[]
   timeline: TimelineEntry[]
   checks_state: string | null
+  checks: CheckEntry[]
 }
 
 export const api = {
@@ -177,4 +221,17 @@ export const api = {
 
   getPrDetails: (owner: string, name: string, number: number) =>
     invoke<PrDetails>('get_pr_details', { owner, name, number }),
+
+  getPrFiles: (owner: string, name: string, number: number) =>
+    invoke<PrFile[]>('get_pr_files', { owner, name, number }),
+
+  mergePullRequest: (prNodeId: string, method: 'MERGE' | 'SQUASH' | 'REBASE') =>
+    invoke<void>('merge_pull_request', { prNodeId, method }),
+
+  addReviewThreadReply: (threadId: string, body: string) =>
+    invoke<void>('add_review_thread_reply', { threadId, body }),
+  resolveReviewThread: (threadId: string) =>
+    invoke<void>('resolve_review_thread', { threadId }),
+  unresolveReviewThread: (threadId: string) =>
+    invoke<void>('unresolve_review_thread', { threadId }),
 }

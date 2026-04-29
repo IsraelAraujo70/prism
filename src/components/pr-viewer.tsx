@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   CircleDashed,
   ExternalLink,
   FileText,
@@ -15,17 +16,24 @@ import {
   RefreshCw,
   type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { CommentCard } from '@/components/comment-card'
+import { DiffViewer } from '@/components/diff-viewer'
+import { Markdown } from '@/components/markdown'
+import { ReviewThreadCard } from '@/components/review-thread-card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   api,
+  type CheckEntry,
   type PrAuthor,
   type PrDetails,
+  type PrFile,
   type PullRequestRef,
   type TimelineEntry,
 } from '@/lib/api'
+import { extractDiffSnippet } from '@/lib/diff'
 import { formatAbsolute, formatRelative } from '@/lib/format'
 
 type State =
@@ -33,29 +41,48 @@ type State =
   | { status: 'ready'; data: PrDetails }
   | { status: 'error'; message: string }
 
+type FilesState =
+  | { status: 'loading' }
+  | { status: 'ready'; files: PrFile[] }
+  | { status: 'error'; message: string }
+
 type Props = {
   pr: PullRequestRef
   onBack: () => void
 }
 
+type MergeMethod = 'MERGE' | 'SQUASH' | 'REBASE'
+type Tab = 'conversation' | 'files'
+
 export function PrViewer({ pr, onBack }: Props) {
   const [state, setState] = useState<State>({ status: 'loading' })
+  const [filesState, setFilesState] = useState<FilesState>({ status: 'loading' })
   const [refreshing, setRefreshing] = useState(false)
+  const [merging, setMerging] = useState(false)
+  const [mergeError, setMergeError] = useState<string | null>(null)
+  const [tab, setTab] = useState<Tab>('conversation')
 
   const [owner, name] = pr.repo.split('/')
 
   const load = useCallback(
     async (silent = false) => {
-      if (!silent) setState({ status: 'loading' })
-      setRefreshing(true)
-      try {
-        const data = await api.getPrDetails(owner, name, pr.number)
-        setState({ status: 'ready', data })
-      } catch (err) {
-        setState({ status: 'error', message: String(err) })
-      } finally {
-        setRefreshing(false)
+      if (!silent) {
+        setState({ status: 'loading' })
+        setFilesState({ status: 'loading' })
       }
+      setRefreshing(true)
+      const detailsPromise = api
+        .getPrDetails(owner, name, pr.number)
+        .then((data) => setState({ status: 'ready', data }))
+        .catch((err) => setState({ status: 'error', message: String(err) }))
+      const filesPromise = api
+        .getPrFiles(owner, name, pr.number)
+        .then((files) => setFilesState({ status: 'ready', files }))
+        .catch((err) =>
+          setFilesState({ status: 'error', message: String(err) }),
+        )
+      await Promise.all([detailsPromise, filesPromise])
+      setRefreshing(false)
     },
     [owner, name, pr.number],
   )
@@ -63,6 +90,22 @@ export function PrViewer({ pr, onBack }: Props) {
   useEffect(() => {
     load()
   }, [load])
+
+  const doMerge = useCallback(
+    async (nodeId: string, method: MergeMethod) => {
+      setMergeError(null)
+      setMerging(true)
+      try {
+        await api.mergePullRequest(nodeId, method)
+        await load(true)
+      } catch (err) {
+        setMergeError(String(err))
+      } finally {
+        setMerging(false)
+      }
+    },
+    [load],
+  )
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
@@ -108,26 +151,95 @@ export function PrViewer({ pr, onBack }: Props) {
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto flex max-w-4xl flex-col gap-5">
-          {state.status === 'loading' && <PrViewerSkeleton />}
+      {state.status === 'ready' && (
+        <TabsNav
+          current={tab}
+          onChange={setTab}
+          timelineCount={state.data.timeline.length}
+          filesCount={state.data.changed_files}
+        />
+      )}
 
-          {state.status === 'error' && (
+      {state.status === 'loading' && (
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="mx-auto flex max-w-4xl flex-col gap-5">
+            <PrViewerSkeleton />
+          </div>
+        </div>
+      )}
+
+      {state.status === 'error' && (
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="mx-auto max-w-4xl">
             <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {state.message}
             </div>
-          )}
-
-          {state.status === 'ready' && <PrBody data={state.data} />}
+          </div>
         </div>
-      </div>
+      )}
+
+      {state.status === 'ready' && tab === 'conversation' && (
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="mx-auto flex max-w-4xl flex-col gap-5">
+            <ConversationContent
+              data={state.data}
+              files={
+                filesState.status === 'ready' ? filesState.files : null
+              }
+              merging={merging}
+              mergeError={mergeError}
+              onMerge={(method) => doMerge(state.data.node_id, method)}
+              onAfterMutation={() => load(true)}
+            />
+          </div>
+        </div>
+      )}
+
+      {state.status === 'ready' && tab === 'files' && (
+        <FilesPane
+          prKey={`${pr.repo}#${pr.number}`}
+          filesState={filesState}
+          additions={state.data.additions}
+          deletions={state.data.deletions}
+          threads={state.data.timeline.filter(
+            (t): t is Extract<TimelineEntry, { kind: 'review_thread' }> =>
+              t.kind === 'review_thread',
+          )}
+          onAfterMutation={() => load(true)}
+        />
+      )}
     </div>
   )
 }
 
-function PrBody({ data }: { data: PrDetails }) {
+function ConversationContent({
+  data,
+  files,
+  merging,
+  mergeError,
+  onMerge,
+  onAfterMutation,
+}: {
+  data: PrDetails
+  files: PrFile[] | null
+  merging: boolean
+  mergeError: string | null
+  onMerge: (method: MergeMethod) => void
+  onAfterMutation: () => Promise<void>
+}) {
   const status = resolveStatus(data)
   const reviewers = mergeReviewers(data)
+  const canMerge =
+    status === 'open' && data.mergeable === 'MERGEABLE' && !data.is_draft
+  const patchByPath = useMemo(() => {
+    const map = new Map<string, string>()
+    if (files) {
+      for (const f of files) {
+        if (f.patch) map.set(f.filename, f.patch)
+      }
+    }
+    return map
+  }, [files])
 
   return (
     <>
@@ -176,7 +288,9 @@ function PrBody({ data }: { data: PrDetails }) {
         <Stat label="Linhas removidas" value={`-${data.deletions}`} accent="del" />
       </section>
 
-      {(data.labels.length > 0 || data.assignees.length > 0 || reviewers.length > 0) && (
+      {(data.labels.length > 0 ||
+        data.assignees.length > 0 ||
+        reviewers.length > 0) && (
         <section className="flex flex-col gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
           {data.labels.length > 0 && (
             <MetaRow label="Labels">
@@ -200,16 +314,27 @@ function PrBody({ data }: { data: PrDetails }) {
         </section>
       )}
 
-      {data.checks_state && <ChecksBanner state={data.checks_state} />}
+      {(data.checks.length > 0 || data.checks_state) && (
+        <ChecksSection checks={data.checks} rollupState={data.checks_state} />
+      )}
+
+      {status === 'open' && (
+        <MergeSection
+          canMerge={canMerge}
+          mergeable={data.mergeable}
+          isDraft={data.is_draft}
+          merging={merging}
+          mergeError={mergeError}
+          onMerge={onMerge}
+        />
+      )}
 
       {data.body.trim().length > 0 && (
         <section className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
           <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             Descrição
           </h2>
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-            {data.body}
-          </p>
+          <Markdown>{data.body}</Markdown>
         </section>
       )}
 
@@ -227,12 +352,101 @@ function PrBody({ data }: { data: PrDetails }) {
         ) : (
           <ol className="flex flex-col gap-3">
             {data.timeline.map((entry, i) => (
-              <TimelineItem key={i} entry={entry} />
+              <TimelineItem
+                key={i}
+                entry={entry}
+                patchByPath={patchByPath}
+                onAfterMutation={onAfterMutation}
+              />
             ))}
           </ol>
         )}
       </section>
     </>
+  )
+}
+
+function TabsNav({
+  current,
+  onChange,
+  timelineCount,
+  filesCount,
+}: {
+  current: Tab
+  onChange: (t: Tab) => void
+  timelineCount: number
+  filesCount: number
+}) {
+  const items: { key: Tab; label: string; count: number }[] = [
+    { key: 'conversation', label: 'Conversa', count: timelineCount },
+    { key: 'files', label: 'Arquivos', count: filesCount },
+  ]
+  return (
+    <div className="flex shrink-0 items-center gap-1 border-b border-border px-6">
+      {items.map((it) => {
+        const active = current === it.key
+        return (
+          <button
+            key={it.key}
+            type="button"
+            onClick={() => onChange(it.key)}
+            className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+              active
+                ? 'border-foreground text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {it.label}
+            <span className="tabular-nums text-muted-foreground/60">
+              {it.count}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function FilesPane({
+  prKey,
+  filesState,
+  additions,
+  deletions,
+  threads,
+  onAfterMutation,
+}: {
+  prKey: string
+  filesState: FilesState
+  additions: number
+  deletions: number
+  threads: Extract<TimelineEntry, { kind: 'review_thread' }>[]
+  onAfterMutation: () => Promise<void>
+}) {
+  if (filesState.status === 'loading') {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <Skeleton className="h-[300px] rounded-xl bg-card" />
+      </div>
+    )
+  }
+  if (filesState.status === 'error') {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="rounded-md bg-destructive/10 px-4 py-3 text-xs text-destructive">
+          Não foi possível carregar os arquivos: {filesState.message}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <DiffViewer
+      prKey={prKey}
+      files={filesState.files}
+      additions={additions}
+      deletions={deletions}
+      threads={threads}
+      onAfterMutation={onAfterMutation}
+    />
   )
 }
 
@@ -408,163 +622,405 @@ function LabelChip({ name, color }: { name: string; color: string }) {
   )
 }
 
-function ChecksBanner({ state }: { state: string }) {
-  const config: Record<
-    string,
-    { label: string; icon: LucideIcon; className: string }
-  > = {
-    SUCCESS: {
-      label: 'Todos os checks passaram',
-      icon: Check,
-      className: 'bg-emerald-500/10 text-emerald-400',
-    },
-    FAILURE: {
-      label: 'Checks falharam',
-      icon: MessageCircleX,
-      className: 'bg-destructive/10 text-destructive',
-    },
-    ERROR: {
-      label: 'Checks com erro',
-      icon: MessageCircleX,
-      className: 'bg-destructive/10 text-destructive',
-    },
-    PENDING: {
-      label: 'Checks em andamento',
-      icon: Loader2,
-      className: 'bg-muted text-muted-foreground',
-    },
-    EXPECTED: {
-      label: 'Checks aguardando',
-      icon: CircleDashed,
-      className: 'bg-muted text-muted-foreground',
-    },
-  }
-  const cfg = config[state] ?? {
-    label: state,
-    icon: CircleDashed,
-    className: 'bg-muted text-muted-foreground',
-  }
+function ChecksSection({
+  checks,
+  rollupState,
+}: {
+  checks: CheckEntry[]
+  rollupState: string | null
+}) {
+  const summary = countByConclusion(checks)
   return (
-    <div
-      className={`inline-flex w-fit items-center gap-2 rounded-lg px-3 py-2 text-xs ${cfg.className}`}
-    >
-      <cfg.icon
-        className={`size-4 ${state === 'PENDING' ? 'animate-spin' : ''}`}
-      />
-      {cfg.label}
-    </div>
+    <section className="rounded-xl bg-card ring-1 ring-foreground/10">
+      <header className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <h2 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Checks
+          {checks.length > 0 && (
+            <span className="tabular-nums text-muted-foreground/60">
+              {checks.length}
+            </span>
+          )}
+        </h2>
+        <RollupBadge state={rollupState} summary={summary} />
+      </header>
+      {checks.length === 0 ? (
+        <p className="px-4 py-3 text-xs text-muted-foreground">
+          Sem detalhes de checks individuais.
+        </p>
+      ) : (
+        <ul className="flex flex-col">
+          {checks.map((c, i) => (
+            <CheckItem key={`${c.name}-${i}`} check={c} />
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
-function TimelineItem({ entry }: { entry: TimelineEntry }) {
-  if (entry.kind === 'comment') {
+type CheckTone = 'success' | 'failure' | 'pending' | 'neutral'
+
+function checkTone(c: CheckEntry): CheckTone {
+  if (c.status !== 'COMPLETED') return 'pending'
+  switch (c.conclusion) {
+    case 'SUCCESS':
+      return 'success'
+    case 'FAILURE':
+    case 'ERROR':
+    case 'TIMED_OUT':
+    case 'CANCELLED':
+    case 'ACTION_REQUIRED':
+    case 'STARTUP_FAILURE':
+      return 'failure'
+    default:
+      return 'neutral'
+  }
+}
+
+function countByConclusion(checks: CheckEntry[]) {
+  let success = 0
+  let failure = 0
+  let pending = 0
+  let neutral = 0
+  for (const c of checks) {
+    const tone = checkTone(c)
+    if (tone === 'success') success++
+    else if (tone === 'failure') failure++
+    else if (tone === 'pending') pending++
+    else neutral++
+  }
+  return { success, failure, pending, neutral }
+}
+
+function RollupBadge({
+  state,
+  summary,
+}: {
+  state: string | null
+  summary: { success: number; failure: number; pending: number; neutral: number }
+}) {
+  const total =
+    summary.success + summary.failure + summary.pending + summary.neutral
+  if (total === 0 && !state) return null
+
+  if (summary.failure > 0) {
     return (
-      <li className="rounded-xl bg-card ring-1 ring-foreground/10">
-        <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-          {entry.author && (
-            <>
-              <Avatar className="size-6">
-                <AvatarImage
-                  src={entry.author.avatar_url}
-                  alt={entry.author.login}
-                />
-                <AvatarFallback className="bg-muted text-[9px] font-semibold">
-                  {entry.author.login.slice(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <span className="text-sm font-medium text-foreground">
-                {entry.author.login}
-              </span>
-            </>
-          )}
-          <span className="text-xs text-muted-foreground">comentou</span>
-          <span
-            className="ml-auto text-xs text-muted-foreground/70"
-            title={formatAbsolute(entry.created_at)}
-          >
-            {formatRelative(entry.created_at)}
-          </span>
-        </header>
-        <div className="px-4 py-3">
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-            {entry.body || (
-              <span className="italic text-muted-foreground">(sem texto)</span>
-            )}
-          </p>
-        </div>
-      </li>
+      <span className="inline-flex items-center gap-1 text-xs text-rose-400">
+        <MessageCircleX className="size-3.5" />
+        {summary.failure} falhando
+      </span>
     )
   }
+  if (summary.pending > 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        {summary.pending} rodando
+      </span>
+    )
+  }
+  if (summary.success > 0 && summary.success === total) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
+        <Check className="size-3.5" />
+        Todos passando
+      </span>
+    )
+  }
+  if (state === 'SUCCESS') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
+        <Check className="size-3.5" />
+        Sucesso
+      </span>
+    )
+  }
+  if (state === 'FAILURE' || state === 'ERROR') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-rose-400">
+        <MessageCircleX className="size-3.5" />
+        Falha
+      </span>
+    )
+  }
+  if (state === 'PENDING' || state === 'EXPECTED') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        Aguardando
+      </span>
+    )
+  }
+  return null
+}
 
-  const reviewConfig: Record<
-    string,
-    { label: string; className: string; icon: LucideIcon }
-  > = {
-    APPROVED: {
-      label: 'aprovou',
-      className: 'text-emerald-400',
-      icon: Check,
-    },
-    CHANGES_REQUESTED: {
-      label: 'pediu mudanças',
-      className: 'text-rose-400',
-      icon: MessageCircleX,
-    },
-    COMMENTED: {
-      label: 'comentou na review',
-      className: 'text-muted-foreground',
-      icon: MessageSquare,
-    },
-    DISMISSED: {
-      label: 'review descartada',
-      className: 'text-muted-foreground',
-      icon: CircleDashed,
-    },
+function CheckItem({ check }: { check: CheckEntry }) {
+  const tone = checkTone(check)
+  const toneIcon: Record<CheckTone, LucideIcon> = {
+    success: Check,
+    failure: MessageCircleX,
+    pending: Loader2,
+    neutral: CircleDashed,
   }
-  const cfg = reviewConfig[entry.state] ?? {
-    label: entry.state.toLowerCase(),
-    className: 'text-muted-foreground',
-    icon: MessageSquare,
+  const toneColor: Record<CheckTone, string> = {
+    success: 'text-emerald-400',
+    failure: 'text-rose-400',
+    pending: 'text-muted-foreground',
+    neutral: 'text-muted-foreground/70',
   }
+  const Icon = toneIcon[tone]
+
+  const duration = formatDuration(check.started_at, check.completed_at)
+  const subtitle = [check.app_name, check.workflow_name, duration]
+    .filter(Boolean)
+    .join(' · ')
+
+  const clickable = Boolean(check.url)
+  const Wrapper: 'button' | 'div' = clickable ? 'button' : 'div'
 
   return (
-    <li className="rounded-xl bg-card ring-1 ring-foreground/10">
-      <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        {entry.author && (
-          <>
-            <Avatar className="size-6">
-              <AvatarImage
-                src={entry.author.avatar_url}
-                alt={entry.author.login}
-              />
-              <AvatarFallback className="bg-muted text-[9px] font-semibold">
-                {entry.author.login.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <span className="text-sm font-medium text-foreground">
-              {entry.author.login}
+    <li className="border-t border-border first:border-t-0">
+      <Wrapper
+        type={clickable ? 'button' : undefined}
+        onClick={
+          clickable && check.url
+            ? () => api.openUrl(check.url as string)
+            : undefined
+        }
+        className={`group flex w-full items-center gap-3 px-4 py-2.5 text-left ${
+          clickable ? 'transition-colors hover:bg-accent' : ''
+        }`}
+      >
+        <Icon
+          className={`size-4 shrink-0 ${toneColor[tone]} ${
+            tone === 'pending' ? 'animate-spin' : ''
+          }`}
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm text-foreground/90">
+            {check.name}
+          </span>
+          {subtitle && (
+            <span className="truncate text-[11px] text-muted-foreground">
+              {subtitle}
             </span>
-          </>
+          )}
+        </div>
+        {clickable && (
+          <ExternalLink className="size-3.5 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
         )}
-        <span className={`inline-flex items-center gap-1 text-xs ${cfg.className}`}>
-          <cfg.icon className="size-3.5" />
-          {cfg.label}
-        </span>
-        <span
-          className="ml-auto text-xs text-muted-foreground/70"
-          title={formatAbsolute(entry.submitted_at)}
-        >
-          {formatRelative(entry.submitted_at)}
-        </span>
-      </header>
-      {entry.body.trim().length > 0 && (
-        <div className="px-4 py-3">
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-            {entry.body}
-          </p>
+      </Wrapper>
+    </li>
+  )
+}
+
+function formatDuration(
+  started: string | null,
+  completed: string | null,
+): string | null {
+  if (!started || !completed) return null
+  const a = new Date(started).getTime()
+  const b = new Date(completed).getTime()
+  if (Number.isNaN(a) || Number.isNaN(b) || b <= a) return null
+  const sec = Math.round((b - a) / 1000)
+  if (sec < 60) return `${sec}s`
+  const min = Math.floor(sec / 60)
+  const rem = sec % 60
+  if (min < 60) return rem ? `${min}m ${rem}s` : `${min}m`
+  const hr = Math.floor(min / 60)
+  return `${hr}h ${min % 60}m`
+}
+
+function MergeSection({
+  canMerge,
+  mergeable,
+  isDraft,
+  merging,
+  mergeError,
+  onMerge,
+}: {
+  canMerge: boolean
+  mergeable: string
+  isDraft: boolean
+  merging: boolean
+  mergeError: string | null
+  onMerge: (method: MergeMethod) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  let blockReason: string | null = null
+  if (isDraft) blockReason = 'PR está como Draft. Marque como Ready for review primeiro.'
+  else if (mergeable === 'CONFLICTING')
+    blockReason = 'Existem conflitos com a branch base. Resolva antes de mergear.'
+  else if (mergeable === 'UNKNOWN')
+    blockReason = 'GitHub ainda calculando se é mergeable. Tente atualizar.'
+
+  const methods: { key: MergeMethod; label: string; hint: string }[] = [
+    { key: 'MERGE', label: 'Create a merge commit', hint: 'Mantém os commits + um merge commit' },
+    { key: 'SQUASH', label: 'Squash and merge', hint: 'Combina todos commits em um' },
+    { key: 'REBASE', label: 'Rebase and merge', hint: 'Aplica os commits sem merge commit' },
+  ]
+
+  return (
+    <section className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+      <div className="flex items-center gap-3">
+        <GitMerge
+          className={`size-4 shrink-0 ${canMerge ? 'text-emerald-400' : 'text-muted-foreground'}`}
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="text-sm font-medium text-foreground">
+            {canMerge ? 'Pronto pra mergear' : 'Não pode mergear ainda'}
+          </span>
+          {blockReason && (
+            <span className="text-xs text-muted-foreground">{blockReason}</span>
+          )}
+        </div>
+        {canMerge && (
+          <div ref={ref} className="relative">
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              disabled={merging}
+              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-400 ring-1 ring-emerald-500/20 transition-colors hover:bg-emerald-500/25 disabled:opacity-50"
+            >
+              {merging ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Mergeando…
+                </>
+              ) : (
+                <>
+                  <GitMerge className="size-3.5" />
+                  Merge
+                  <ChevronDown className="size-3" />
+                </>
+              )}
+            </button>
+            {open && !merging && (
+              <div className="absolute right-0 top-full z-10 mt-1 w-72 rounded-md border border-border bg-popover p-1 shadow-md">
+                {methods.map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => {
+                      setOpen(false)
+                      onMerge(m.key)
+                    }}
+                    className="flex w-full flex-col items-start rounded-md px-3 py-2 text-left transition-colors hover:bg-accent"
+                  >
+                    <span className="text-sm text-foreground">{m.label}</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {m.hint}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {mergeError && (
+        <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {mergeError}
         </div>
       )}
-    </li>
+    </section>
+  )
+}
+
+const REVIEW_ACTION: Record<
+  string,
+  { label: string; className: string; icon: LucideIcon }
+> = {
+  APPROVED: {
+    label: 'aprovou',
+    className: 'text-emerald-400',
+    icon: Check,
+  },
+  CHANGES_REQUESTED: {
+    label: 'pediu mudanças',
+    className: 'text-rose-400',
+    icon: MessageCircleX,
+  },
+  COMMENTED: {
+    label: 'comentou na review',
+    className: 'text-muted-foreground',
+    icon: MessageSquare,
+  },
+  DISMISSED: {
+    label: 'review descartada',
+    className: 'text-muted-foreground',
+    icon: CircleDashed,
+  },
+}
+
+function TimelineItem({
+  entry,
+  patchByPath,
+  onAfterMutation,
+}: {
+  entry: TimelineEntry
+  patchByPath: Map<string, string>
+  onAfterMutation: () => Promise<void>
+}) {
+  if (entry.kind === 'review_thread') {
+    const patch = patchByPath.get(entry.path)
+    const snippet =
+      patch && entry.line != null
+        ? extractDiffSnippet(patch, entry.line)
+        : null
+    return (
+      <ReviewThreadCard
+        thread={entry}
+        snippet={snippet}
+        onReply={async (body) => {
+          await api.addReviewThreadReply(entry.id, body)
+          await onAfterMutation()
+        }}
+        onResolveToggle={async () => {
+          if (entry.is_resolved) await api.unresolveReviewThread(entry.id)
+          else await api.resolveReviewThread(entry.id)
+          await onAfterMutation()
+        }}
+      />
+    )
+  }
+  if (entry.kind === 'comment') {
+    return (
+      <CommentCard
+        author={entry.author}
+        createdAt={entry.created_at}
+        body={entry.body}
+        action={{ label: 'comentou' }}
+        placeholderForEmpty
+      />
+    )
+  }
+  const cfg =
+    REVIEW_ACTION[entry.state] ?? {
+      label: entry.state.toLowerCase(),
+      className: 'text-muted-foreground',
+      icon: MessageSquare,
+    }
+  return (
+    <CommentCard
+      author={entry.author}
+      createdAt={entry.submitted_at}
+      body={entry.body}
+      action={cfg}
+    />
   )
 }
 

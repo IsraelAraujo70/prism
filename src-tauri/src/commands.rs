@@ -3,7 +3,7 @@ use crate::db::{self, DbState, WatchedRepo};
 use crate::error::{AppError, AppResult};
 use crate::github::{
     self, Client, DeviceCodeResponse, DevicePollResult, GithubUser, OrgRef, PollOutcome,
-    PrAuthor, PullRequestRef, Repo,
+    PrAuthor, PrFile, PullRequestRef, Repo,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -399,6 +399,14 @@ pub struct PrLabel {
 }
 
 #[derive(Debug, Serialize, Clone)]
+pub struct ThreadComment {
+    pub author: Option<PrAuthor>,
+    pub body: String,
+    pub created_at: String,
+    pub state: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TimelineEntry {
     Comment {
@@ -412,11 +420,35 @@ pub enum TimelineEntry {
         state: String,
         submitted_at: String,
     },
+    ReviewThread {
+        id: String,
+        path: String,
+        line: Option<i64>,
+        is_resolved: bool,
+        is_outdated: bool,
+        comments: Vec<ThreadComment>,
+        created_at: String,
+    },
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct CheckEntry {
+    pub name: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub url: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub app_name: Option<String>,
+    pub app_logo_url: Option<String>,
+    pub workflow_name: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct PrDetails {
     pub id: i64,
+    pub node_id: String,
     pub number: i64,
     pub title: String,
     pub body: String,
@@ -441,6 +473,7 @@ pub struct PrDetails {
     pub review_requests: Vec<PrAuthor>,
     pub timeline: Vec<TimelineEntry>,
     pub checks_state: Option<String>,
+    pub checks: Vec<CheckEntry>,
 }
 
 const PR_DETAILS_QUERY: &str = r#"
@@ -448,6 +481,7 @@ query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
     pullRequest(number: $number) {
+      id
       databaseId
       number
       title
@@ -491,10 +525,55 @@ query($owner: String!, $name: String!, $number: Int!) {
           submittedAt
         }
       }
+      reviewThreads(first: 50) {
+        nodes {
+          id
+          path
+          line
+          originalLine
+          isResolved
+          isOutdated
+          comments(first: 50) {
+            nodes {
+              author { login avatarUrl }
+              body
+              createdAt
+              state
+            }
+          }
+        }
+      }
       lastCommit: commits(last: 1) {
         nodes {
           commit {
-            statusCheckRollup { state }
+            oid
+            statusCheckRollup {
+              state
+              contexts(first: 100) {
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    name
+                    status
+                    conclusion
+                    detailsUrl
+                    startedAt
+                    completedAt
+                    checkSuite {
+                      app { name logoUrl }
+                      workflowRun { workflow { name } }
+                    }
+                  }
+                  ... on StatusContext {
+                    context
+                    state
+                    targetUrl
+                    description
+                    avatarUrl
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -518,6 +597,7 @@ struct PrGqlRepo {
 
 #[derive(Deserialize)]
 struct PrGqlNode {
+    id: String,
     #[serde(rename = "databaseId")]
     database_id: Option<i64>,
     number: i64,
@@ -554,8 +634,44 @@ struct PrGqlNode {
     review_requests: GqlReviewRequestConnection,
     comments: GqlCommentConnection,
     reviews: GqlReviewConnection,
+    #[serde(rename = "reviewThreads")]
+    review_threads: GqlThreadConnection,
     #[serde(rename = "lastCommit")]
     last_commit: GqlCommitConnection,
+}
+
+#[derive(Deserialize)]
+struct GqlThreadConnection {
+    nodes: Vec<GqlThreadNode>,
+}
+
+#[derive(Deserialize)]
+struct GqlThreadNode {
+    id: String,
+    path: String,
+    line: Option<i64>,
+    #[serde(rename = "originalLine")]
+    original_line: Option<i64>,
+    #[serde(rename = "isResolved")]
+    is_resolved: bool,
+    #[serde(rename = "isOutdated")]
+    is_outdated: bool,
+    comments: GqlThreadCommentConnection,
+}
+
+#[derive(Deserialize)]
+struct GqlThreadCommentConnection {
+    nodes: Vec<GqlThreadComment>,
+}
+
+#[derive(Deserialize)]
+struct GqlThreadComment {
+    author: Option<GqlUser>,
+    #[serde(default)]
+    body: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    state: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -647,6 +763,63 @@ struct GqlCommit {
 #[derive(Deserialize)]
 struct GqlRollup {
     state: String,
+    contexts: GqlContextConnection,
+}
+
+#[derive(Deserialize)]
+struct GqlContextConnection {
+    nodes: Vec<GqlCheckContext>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "__typename")]
+enum GqlCheckContext {
+    CheckRun {
+        name: String,
+        status: String,
+        conclusion: Option<String>,
+        #[serde(rename = "detailsUrl")]
+        details_url: Option<String>,
+        #[serde(rename = "startedAt")]
+        started_at: Option<String>,
+        #[serde(rename = "completedAt")]
+        completed_at: Option<String>,
+        #[serde(rename = "checkSuite")]
+        check_suite: Option<GqlCheckSuite>,
+    },
+    StatusContext {
+        context: String,
+        state: String,
+        #[serde(rename = "targetUrl")]
+        target_url: Option<String>,
+        description: Option<String>,
+    },
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GqlCheckSuite {
+    app: Option<GqlApp>,
+    #[serde(rename = "workflowRun")]
+    workflow_run: Option<GqlWorkflowRun>,
+}
+
+#[derive(Deserialize)]
+struct GqlApp {
+    name: String,
+    #[serde(rename = "logoUrl")]
+    logo_url: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GqlWorkflowRun {
+    workflow: Option<GqlWorkflow>,
+}
+
+#[derive(Deserialize)]
+struct GqlWorkflow {
+    name: String,
 }
 
 fn user_to_author(u: GqlUser) -> PrAuthor {
@@ -707,7 +880,7 @@ pub async fn get_pr_details(
         });
     }
     for r in pr.reviews.nodes {
-        if let Some(submitted_at) = r.submitted_at {
+        if let (Some(submitted_at), false) = (r.submitted_at.clone(), r.body.is_empty() && r.state == "PENDING") {
             timeline.push(TimelineEntry::Review {
                 author: r.author.map(user_to_author),
                 body: r.body,
@@ -716,18 +889,109 @@ pub async fn get_pr_details(
             });
         }
     }
+    for t in pr.review_threads.nodes {
+        let comments: Vec<ThreadComment> = t
+            .comments
+            .nodes
+            .into_iter()
+            .map(|c| ThreadComment {
+                author: c.author.map(user_to_author),
+                body: c.body,
+                created_at: c.created_at,
+                state: c.state,
+            })
+            .collect();
+        let created_at = comments
+            .first()
+            .map(|c| c.created_at.clone())
+            .unwrap_or_default();
+        timeline.push(TimelineEntry::ReviewThread {
+            id: t.id,
+            path: t.path,
+            line: t.line.or(t.original_line),
+            is_resolved: t.is_resolved,
+            is_outdated: t.is_outdated,
+            comments,
+            created_at,
+        });
+    }
     timeline.sort_by(|a, b| timeline_at(a).cmp(timeline_at(b)));
 
-    let checks_state = pr
+    let rollup = pr
         .last_commit
         .nodes
         .into_iter()
         .next()
-        .and_then(|n| n.commit.status_check_rollup)
-        .map(|r| r.state);
+        .and_then(|n| n.commit.status_check_rollup);
+
+    let (checks_state, checks) = match rollup {
+        None => (None, Vec::new()),
+        Some(r) => {
+            let entries = r
+                .contexts
+                .nodes
+                .into_iter()
+                .map(|c| match c {
+                    GqlCheckContext::CheckRun {
+                        name,
+                        status,
+                        conclusion,
+                        details_url,
+                        started_at,
+                        completed_at,
+                        check_suite,
+                    } => {
+                        let suite = check_suite.unwrap_or_default();
+                        let app = suite.app;
+                        let workflow_name = suite
+                            .workflow_run
+                            .and_then(|w| w.workflow)
+                            .map(|w| w.name);
+                        CheckEntry {
+                            name,
+                            status,
+                            conclusion,
+                            url: details_url,
+                            started_at,
+                            completed_at,
+                            app_name: app.as_ref().map(|a| a.name.clone()),
+                            app_logo_url: app.and_then(|a| a.logo_url),
+                            workflow_name,
+                            description: None,
+                        }
+                    }
+                    GqlCheckContext::StatusContext {
+                        context,
+                        state,
+                        target_url,
+                        description,
+                    } => {
+                        let (status, conclusion) = match state.as_str() {
+                            "PENDING" | "EXPECTED" => ("PENDING".to_string(), None),
+                            _ => ("COMPLETED".to_string(), Some(state)),
+                        };
+                        CheckEntry {
+                            name: context,
+                            status,
+                            conclusion,
+                            url: target_url,
+                            started_at: None,
+                            completed_at: None,
+                            app_name: None,
+                            app_logo_url: None,
+                            workflow_name: None,
+                            description,
+                        }
+                    }
+                })
+                .collect();
+            (Some(r.state), entries)
+        }
+    };
 
     Ok(PrDetails {
         id: pr.database_id.unwrap_or(0),
+        node_id: pr.id,
         number: pr.number,
         title: pr.title,
         body: pr.body,
@@ -752,6 +1016,7 @@ pub async fn get_pr_details(
         review_requests,
         timeline,
         checks_state,
+        checks,
     })
 }
 
@@ -759,7 +1024,114 @@ fn timeline_at(e: &TimelineEntry) -> &str {
     match e {
         TimelineEntry::Comment { created_at, .. } => created_at,
         TimelineEntry::Review { submitted_at, .. } => submitted_at,
+        TimelineEntry::ReviewThread { created_at, .. } => created_at,
     }
+}
+
+const MERGE_MUTATION: &str = r#"
+mutation($input: MergePullRequestInput!) {
+  mergePullRequest(input: $input) {
+    pullRequest { state merged mergedAt }
+  }
+}
+"#;
+
+#[tauri::command]
+pub async fn merge_pull_request(
+    pr_node_id: String,
+    method: String,
+) -> AppResult<()> {
+    let upper = method.to_uppercase();
+    let merge_method = match upper.as_str() {
+        "MERGE" | "SQUASH" | "REBASE" => upper,
+        _ => return Err(AppError::InvalidToken(format!("método inválido: {method}"))),
+    };
+
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+
+    let variables = serde_json::json!({
+        "input": {
+            "pullRequestId": pr_node_id,
+            "mergeMethod": merge_method,
+        }
+    });
+
+    let _: serde_json::Value = client.graphql(MERGE_MUTATION, variables).await?;
+    Ok(())
+}
+
+const ADD_THREAD_REPLY_MUTATION: &str = r#"
+mutation($input: AddPullRequestReviewThreadReplyInput!) {
+  addPullRequestReviewThreadReply(input: $input) {
+    comment { id }
+  }
+}
+"#;
+
+#[tauri::command]
+pub async fn add_review_thread_reply(
+    thread_id: String,
+    body: String,
+) -> AppResult<()> {
+    let body = body.trim().to_string();
+    if body.is_empty() {
+        return Err(AppError::InvalidToken("comentário vazio".into()));
+    }
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    let variables = serde_json::json!({
+        "input": {
+            "pullRequestReviewThreadId": thread_id,
+            "body": body,
+        }
+    });
+    let _: serde_json::Value = client.graphql(ADD_THREAD_REPLY_MUTATION, variables).await?;
+    Ok(())
+}
+
+const RESOLVE_THREAD_MUTATION: &str = r#"
+mutation($input: ResolveReviewThreadInput!) {
+  resolveReviewThread(input: $input) {
+    thread { id isResolved }
+  }
+}
+"#;
+
+const UNRESOLVE_THREAD_MUTATION: &str = r#"
+mutation($input: UnresolveReviewThreadInput!) {
+  unresolveReviewThread(input: $input) {
+    thread { id isResolved }
+  }
+}
+"#;
+
+#[tauri::command]
+pub async fn resolve_review_thread(thread_id: String) -> AppResult<()> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    let variables = serde_json::json!({ "input": { "threadId": thread_id } });
+    let _: serde_json::Value = client.graphql(RESOLVE_THREAD_MUTATION, variables).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn unresolve_review_thread(thread_id: String) -> AppResult<()> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    let variables = serde_json::json!({ "input": { "threadId": thread_id } });
+    let _: serde_json::Value = client.graphql(UNRESOLVE_THREAD_MUTATION, variables).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_pr_files(
+    owner: String,
+    name: String,
+    number: i64,
+) -> AppResult<Vec<PrFile>> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    Client::new(token)?.list_pr_files(&owner, &name, number).await
 }
 
 // ── GitHub API ─────────────────────────────────────────
