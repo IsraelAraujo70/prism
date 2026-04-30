@@ -10,6 +10,7 @@ import { PrViewer } from '@/components/pr-viewer'
 import { RepoList } from '@/components/repo-list'
 import { SearchSidebarLink } from '@/components/search-sidebar-link'
 import { SettingsDialog } from '@/components/settings-dialog'
+import { UpdatePill } from '@/components/update-pill'
 import { UserMenu } from '@/components/user-menu'
 import {
   api,
@@ -180,6 +181,7 @@ function App() {
             if (selectedRepo?.id === id) setSelectedRepo(null)
           }}
         />
+        <UpdatePill collapsed={collapsed} />
         <UserMenu user={user} onLogout={handleLogout} collapsed={collapsed} />
       </aside>
 

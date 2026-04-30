@@ -132,9 +132,12 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           args: ${{ matrix.args }}
+          updaterJsonPreferNsis: false
 
   finalize:
     needs: [prepare-release, build]
@@ -150,6 +153,13 @@ jobs:
           set -e
           gh api "repos/$REPO/releases/$RELEASE_ID/assets" --jq '.[] | "\(.id)\t\(.name)"' \
           | while IFS=$'\t' read -r id name; do
+              # Skip updater bundles + signatures + manifest — latest.json points
+              # at versioned URLs and renaming would 404 the auto-update.
+              case "$name" in
+                latest.json|*.tar.gz|*.tar.gz.sig|*.sig|*.zip|*.zip.sig)
+                  continue
+                  ;;
+              esac
               new=$(printf '%s' "$name" | sed -E 's/([_-])[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?[._-]?/\1/')
               if [ "$new" != "$name" ]; then
                 echo "Renaming: $name -> $new"

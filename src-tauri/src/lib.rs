@@ -20,8 +20,17 @@ pub fn run() {
 
   let conn = db::init();
 
-  tauri::Builder::default()
-    .plugin(tauri_plugin_notification::init())
+  let mut builder = tauri::Builder::default()
+    .plugin(tauri_plugin_notification::init());
+
+  #[cfg(desktop)]
+  {
+    builder = builder
+      .plugin(tauri_plugin_updater::Builder::new().build())
+      .plugin(tauri_plugin_process::init());
+  }
+
+  builder
     .manage(db::DbState(Mutex::new(conn)))
     .on_window_event(|window, event| {
       if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -66,6 +75,7 @@ pub fn run() {
       commands::get_pr_details,
       commands::get_pr_files,
       commands::merge_pull_request,
+      commands::approve_pull_request,
       commands::add_review_thread_reply,
       commands::resolve_review_thread,
       commands::unresolve_review_thread,

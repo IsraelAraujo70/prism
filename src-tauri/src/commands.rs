@@ -478,6 +478,7 @@ pub struct PrDetails {
     pub checks: Vec<CheckEntry>,
     pub pending_review_id: Option<String>,
     pub pending_review_threads_count: i64,
+    pub viewer_has_approved: bool,
 }
 
 const PR_DETAILS_QUERY: &str = r#"
@@ -894,14 +895,27 @@ pub async fn get_pr_details(
     }
     let viewer_login = data.viewer.login.clone();
     let mut pending_review_id: Option<String> = None;
+    let mut viewer_latest_review: Option<(String, String)> = None;
     for r in pr.reviews.nodes {
-        let is_viewer_pending = r.state == "PENDING"
-            && r.author.as_ref().map(|a| a.login == viewer_login).unwrap_or(false);
-        if is_viewer_pending {
+        let is_viewer = r
+            .author
+            .as_ref()
+            .map(|a| a.login == viewer_login)
+            .unwrap_or(false);
+        if is_viewer && r.state == "PENDING" {
             pending_review_id = Some(r.id.clone());
             continue;
         }
         if let Some(submitted_at) = r.submitted_at.clone() {
+            if is_viewer && r.state != "DISMISSED" {
+                let is_later = match &viewer_latest_review {
+                    Some((latest_at, _)) => submitted_at > *latest_at,
+                    None => true,
+                };
+                if is_later {
+                    viewer_latest_review = Some((submitted_at.clone(), r.state.clone()));
+                }
+            }
             timeline.push(TimelineEntry::Review {
                 author: r.author.map(user_to_author),
                 body: r.body,
@@ -910,6 +924,9 @@ pub async fn get_pr_details(
             });
         }
     }
+    let viewer_has_approved = viewer_latest_review
+        .map(|(_, state)| state == "APPROVED")
+        .unwrap_or(false);
     let mut pending_review_threads_count: i64 = 0;
     for t in pr.review_threads.nodes {
         let comments: Vec<ThreadComment> = t
@@ -1051,6 +1068,7 @@ pub async fn get_pr_details(
         checks,
         pending_review_id,
         pending_review_threads_count,
+        viewer_has_approved,
     })
 }
 
@@ -1269,6 +1287,29 @@ pub async fn submit_pr_review(
         }
     });
     let _: serde_json::Value = client.graphql(SUBMIT_REVIEW_MUTATION, variables).await?;
+    Ok(())
+}
+
+const APPROVE_PR_MUTATION: &str = r#"
+mutation($input: AddPullRequestReviewInput!) {
+  addPullRequestReview(input: $input) {
+    pullRequestReview { id state }
+  }
+}
+"#;
+
+#[tauri::command]
+pub async fn approve_pull_request(pr_node_id: String, body: String) -> AppResult<()> {
+    let token = auth::load_token()?.ok_or(AppError::NotAuthenticated)?;
+    let client = Client::new(token)?;
+    let variables = serde_json::json!({
+        "input": {
+            "pullRequestId": pr_node_id,
+            "event": "APPROVE",
+            "body": body,
+        }
+    });
+    let _: serde_json::Value = client.graphql(APPROVE_PR_MUTATION, variables).await?;
     Ok(())
 }
 
