@@ -211,16 +211,6 @@ export type NotificationMutes = {
   repos: string[]
 }
 
-export type UpdateInfo = {
-  current_version: string
-  latest_version: string
-  html_url: string
-  has_update: boolean
-  checked_at: number
-}
-
-export const UPDATE_INFO_EVENT = 'prism:update-info'
-
 export type NotificationRow = {
   id: string
   repo_full: string
@@ -348,7 +338,4 @@ export const api = {
     invoke<void>('pause_notifications', { minutes }),
   resumeNotifications: () => invoke<void>('resume_notifications'),
   getPauseStatus: () => invoke<number | null>('get_pause_status'),
-
-  getUpdateInfo: () => invoke<UpdateInfo | null>('get_update_info'),
-  checkUpdatesNow: () => invoke<UpdateInfo>('check_updates_now'),
 }

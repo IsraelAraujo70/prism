@@ -28,6 +28,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,5 +36,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/IsraelAraujo70/prism/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2MDczNkJERTdFNzY0QQpSV1JLZG43ZWEzTmdDd0NNT3pLdW80VmxwQ2ovMFRua25kNEtRQ3VkS0FwS0RIMTFCTms5cTZ1aAo="
+    }
   }
 }

@@ -5,7 +5,6 @@ mod error;
 mod github;
 mod notifications;
 mod tray;
-mod update_checker;
 
 use std::sync::Mutex;
 
@@ -21,10 +20,18 @@ pub fn run() {
 
   let conn = db::init();
 
-  tauri::Builder::default()
-    .plugin(tauri_plugin_notification::init())
+  let mut builder = tauri::Builder::default()
+    .plugin(tauri_plugin_notification::init());
+
+  #[cfg(desktop)]
+  {
+    builder = builder
+      .plugin(tauri_plugin_updater::Builder::new().build())
+      .plugin(tauri_plugin_process::init());
+  }
+
+  builder
     .manage(db::DbState(Mutex::new(conn)))
-    .manage(update_checker::UpdateState::default())
     .on_window_event(|window, event| {
       if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         if window.label() == "main" {
@@ -43,7 +50,6 @@ pub fn run() {
       }
       tray::build(app.handle())?;
       notifications::spawn_loop(app.handle().clone());
-      update_checker::spawn_loop(app.handle().clone());
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
@@ -87,8 +93,6 @@ pub fn run() {
       commands::pause_notifications,
       commands::resume_notifications,
       commands::get_pause_status,
-      commands::get_update_info,
-      commands::check_updates_now,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
