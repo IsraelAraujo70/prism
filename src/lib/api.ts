@@ -200,6 +200,7 @@ export type PrDetails = {
   checks: CheckEntry[]
   pending_review_id: string | null
   pending_review_threads_count: number
+  viewer_has_approved: boolean
 }
 
 export type ReviewSide = 'LEFT' | 'RIGHT'
@@ -278,6 +279,9 @@ export const api = {
 
   mergePullRequest: (prNodeId: string, method: 'MERGE' | 'SQUASH' | 'REBASE') =>
     invoke<void>('merge_pull_request', { prNodeId, method }),
+
+  approvePullRequest: (prNodeId: string, body: string) =>
+    invoke<void>('approve_pull_request', { prNodeId, body }),
 
   addReviewThreadReply: (threadId: string, body: string) =>
     invoke<void>('add_review_thread_reply', { threadId, body }),

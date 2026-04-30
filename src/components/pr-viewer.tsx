@@ -137,18 +137,31 @@ export function PrViewer({ pr, onBack }: Props) {
         >
           <ExternalLink className="size-3.5" />
         </button>
-        <button
-          type="button"
-          onClick={() => load(true)}
-          disabled={refreshing}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-          aria-label="Atualizar"
-        >
-          <RefreshCw
-            className={`size-3.5 ${refreshing ? 'animate-spin' : ''}`}
-          />
-          Atualizar
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {state.status === 'ready' &&
+            resolveStatus(state.data) === 'open' &&
+            !state.data.pending_review_id &&
+            (state.data.viewer_has_approved ? (
+              <ApprovedBadge />
+            ) : (
+              <ApproveButton
+                prNodeId={state.data.node_id}
+                onApproved={() => load(true)}
+              />
+            ))}
+          <button
+            type="button"
+            onClick={() => load(true)}
+            disabled={refreshing}
+            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+            aria-label="Atualizar"
+          >
+            <RefreshCw
+              className={`size-3.5 ${refreshing ? 'animate-spin' : ''}`}
+            />
+            Atualizar
+          </button>
+        </div>
       </header>
 
       {state.status === 'ready' && (
@@ -955,6 +968,118 @@ function formatDuration(
   if (min < 60) return rem ? `${min}m ${rem}s` : `${min}m`
   const hr = Math.floor(min / 60)
   return `${hr}h ${min % 60}m`
+}
+
+function ApprovedBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border"
+      title="Você já aprovou este PR"
+    >
+      <Check className="size-3.5" />
+      Aprovado
+    </span>
+  )
+}
+
+function ApproveButton({
+  prNodeId,
+  onApproved,
+}: {
+  prNodeId: string
+  onApproved: () => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [body, setBody] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  async function approve() {
+    if (submitting) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      await api.approvePullRequest(prNodeId, body)
+      setBody('')
+      setOpen(false)
+      await onApproved()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={submitting}
+        className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-400 ring-1 ring-emerald-500/20 transition-colors hover:bg-emerald-500/25 disabled:opacity-50"
+      >
+        {submitting ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          <Check className="size-3.5" />
+        )}
+        Aprovar
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-10 mt-1 w-80 rounded-md border border-border bg-popover p-3 shadow-md">
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Comentário (opcional)…"
+            rows={3}
+            disabled={submitting}
+            autoFocus
+            className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-sans text-sm leading-snug text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+          />
+          {error && (
+            <div className="mt-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+              {error}
+            </div>
+          )}
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              disabled={submitting}
+              className="rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={approve}
+              disabled={submitting}
+              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-400 ring-1 ring-emerald-500/20 transition-colors hover:bg-emerald-500/25 disabled:opacity-50"
+            >
+              {submitting ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Check className="size-3.5" />
+              )}
+              Aprovar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function MergeSection({
