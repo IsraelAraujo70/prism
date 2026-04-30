@@ -512,7 +512,10 @@ query($owner: String!, $name: String!, $number: Int!) {
       reviewRequests(first: 10) {
         nodes {
           requestedReviewer {
+            __typename
             ... on User { login avatarUrl }
+            ... on Team { name avatarUrl }
+            ... on Mannequin { login avatarUrl }
           }
         }
       }
@@ -725,7 +728,41 @@ struct GqlReviewRequestConnection {
 #[serde(default)]
 struct GqlReviewRequestNode {
     #[serde(rename = "requestedReviewer")]
-    requested_reviewer: Option<GqlUser>,
+    requested_reviewer: Option<GqlReviewer>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "__typename")]
+enum GqlReviewer {
+    User {
+        login: String,
+        #[serde(rename = "avatarUrl")]
+        avatar_url: String,
+    },
+    Team {
+        name: String,
+        #[serde(rename = "avatarUrl")]
+        avatar_url: String,
+    },
+    Mannequin {
+        login: String,
+        #[serde(rename = "avatarUrl")]
+        avatar_url: String,
+    },
+    #[serde(other)]
+    Unknown,
+}
+
+fn reviewer_to_author(r: GqlReviewer) -> Option<PrAuthor> {
+    match r {
+        GqlReviewer::User { login, avatar_url }
+        | GqlReviewer::Mannequin { login, avatar_url } => Some(PrAuthor { login, avatar_url }),
+        GqlReviewer::Team { name, avatar_url } => Some(PrAuthor {
+            login: name,
+            avatar_url,
+        }),
+        GqlReviewer::Unknown => None,
+    }
 }
 
 #[derive(Deserialize)]
@@ -882,7 +919,7 @@ pub async fn get_pr_details(
         .review_requests
         .nodes
         .into_iter()
-        .filter_map(|n| n.requested_reviewer.map(user_to_author))
+        .filter_map(|n| n.requested_reviewer.and_then(reviewer_to_author))
         .collect();
 
     let mut timeline: Vec<TimelineEntry> = Vec::new();
