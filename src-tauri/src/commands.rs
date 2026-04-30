@@ -6,6 +6,7 @@ use crate::github::{
     PrAuthor, PrFile, PullRequestRef, Repo,
 };
 use crate::notifications;
+use crate::update_checker::{self, UpdateInfo, UpdateState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
@@ -1424,6 +1425,27 @@ pub async fn resume_notifications(app: tauri::AppHandle) -> AppResult<()> {
 #[tauri::command]
 pub async fn get_pause_status(app: tauri::AppHandle) -> AppResult<Option<i64>> {
     Ok(notifications::paused_until(&app))
+}
+
+// ── Updates ────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_update_info(state: State<'_, UpdateState>) -> Option<UpdateInfo> {
+    state.0.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub async fn check_updates_now(
+    app: tauri::AppHandle,
+    state: State<'_, UpdateState>,
+) -> AppResult<UpdateInfo> {
+    let info = update_checker::check_now().await?;
+    {
+        let mut guard = state.0.lock().unwrap();
+        *guard = Some(info.clone());
+    }
+    let _ = tauri::Emitter::emit(&app, update_checker::EVENT_UPDATE_INFO, info.clone());
+    Ok(info)
 }
 
 // ── Repo PR list ───────────────────────────────────────
