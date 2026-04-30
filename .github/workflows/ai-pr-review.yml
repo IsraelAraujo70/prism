@@ -12,30 +12,20 @@ jobs:
   ai-review:
     name: Codex review
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Restore Codex auth cache
-        id: codex-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.codex/auth.json
-          key: codex-auth-${{ github.repository }}-${{ github.run_id }}
-          restore-keys: |
-            codex-auth-${{ github.repository }}-
-
-      - name: Seed Codex auth from secret on cache miss
-        if: steps.codex-cache.outputs.cache-hit != 'true'
+      - name: Seed Codex auth from secret
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
         run: |
           set -euo pipefail
           if [ -z "${CODEX_AUTH_JSON:-}" ]; then
-            echo "::error::CODEX_AUTH_JSON secret is not set and no cached auth was restored. Run 'codex login' locally and paste the contents of ~/.codex/auth.json into the CODEX_AUTH_JSON repo secret."
+            echo "::error::CODEX_AUTH_JSON secret is not set. Run 'codex login' locally and store the contents of ~/.codex/auth.json in the CODEX_AUTH_JSON repo secret."
             exit 1
           fi
           mkdir -p ~/.codex
@@ -46,76 +36,100 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Codex CLI
-        run: npm install -g @openai/codex
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Verify Codex auth
+      - name: Install Codex CLI and pyyaml
         run: |
-          codex --version
-          codex auth status || true
+          npm install -g @openai/codex
+          pip install pyyaml
 
-      - name: Compute PR diff
+      - name: Run AI review per area
+        id: review
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          git diff "$BASE_SHA"..."$HEAD_SHA" > /tmp/pr.diff
-          echo "Diff size: $(wc -c </tmp/pr.diff) bytes, $(wc -l </tmp/pr.diff) lines"
-          head -c 500 /tmp/pr.diff
+          python .github/scripts/pr_review.py \
+            --config .github/pr-review.yml \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --out /tmp/pr-review-results.json
+          echo "--- results ---"
+          cat /tmp/pr-review-results.json
 
-      - name: Run Codex spike prompt
-        id: codex
-        run: |
-          set -euo pipefail
-          PROMPT_FILE=/tmp/prompt.txt
-          {
-            echo "You are reviewing a pull request as a smoke test."
-            echo "Read the diff at /tmp/pr.diff and respond with:"
-            echo "1. One-sentence summary of what changed."
-            echo "2. One concern, if any (or 'no concerns')."
-            echo "Keep the entire response under 100 words. Plain text only."
-          } > "$PROMPT_FILE"
-          codex exec \
-            --sandbox read-only \
-            --skip-git-repo-check \
-            --output-last-message /tmp/codex-out.txt \
-            "$(cat $PROMPT_FILE)" \
-            2>&1 | tee /tmp/codex-log.txt
-          echo "--- Final message ---"
-          cat /tmp/codex-out.txt
-
-      - name: Post review comment
+      - name: Post aggregated review comment
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const marker = '<!-- prism-ai-review -->';
-            const ok = '${{ steps.codex.outcome }}' === 'success';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const verdictBadge = (v) => {
+              if (v === 'pass') return '✅ PASS';
+              if (v === 'concerns') return '⚠️ CONCERNS';
+              if (v === 'skipped') return '⏭️ skipped';
+              if (v === 'error') return '💥 error';
+              return '❓ unknown';
+            };
+
             let body;
-            if (ok && fs.existsSync('/tmp/codex-out.txt')) {
-              const out = fs.readFileSync('/tmp/codex-out.txt', 'utf8').trim() || '_(empty response)_';
-              body = [marker, '## 🤖 AI PR review (spike)', '', out].join('\n');
+            const reviewOk = '${{ steps.review.outcome }}' === 'success';
+
+            if (reviewOk && fs.existsSync('/tmp/pr-review-results.json')) {
+              const results = JSON.parse(fs.readFileSync('/tmp/pr-review-results.json', 'utf8'));
+
+              const lines = [marker, '## 🤖 AI PR review', ''];
+
+              lines.push('| Area | Verdict | Files |');
+              lines.push('| --- | --- | ---: |');
+              for (const r of results) {
+                const filesCell = r.skipped ? '—' : String(r.files.length);
+                lines.push(`| ${r.label} | ${verdictBadge(r.verdict)} | ${filesCell} |`);
+              }
+              lines.push('');
+
+              const reviewed = results.filter(r => !r.skipped);
+              if (reviewed.length === 0) {
+                lines.push('_No area in `pr-review.yml` matched the PR diff._');
+              } else {
+                for (const r of reviewed) {
+                  lines.push(`### ${r.label} — ${verdictBadge(r.verdict)}`);
+                  if (r.diff_truncated) {
+                    lines.push('_Diff truncated for this area; review may be partial._');
+                  }
+                  if (r.ok) {
+                    lines.push('');
+                    lines.push(r.output || '_(empty response)_');
+                  } else {
+                    lines.push('');
+                    lines.push('Codex execution failed. Last log lines:');
+                    lines.push('```');
+                    lines.push(r.log_tail || '(no log captured)');
+                    lines.push('```');
+                  }
+                  lines.push('');
+                }
+              }
+
+              lines.push('---');
+              lines.push('_Reviewed with Codex CLI · rubrics in `.github/pr-review.yml`_');
+              body = lines.join('\n');
             } else {
-              const log = fs.existsSync('/tmp/codex-log.txt')
-                ? fs.readFileSync('/tmp/codex-log.txt', 'utf8').slice(-3000)
-                : '(no log captured)';
               body = [
                 marker,
-                '## 🤖 AI PR review (spike) — failed',
+                '## 🤖 AI PR review — failed',
                 '',
-                'Codex execution failed. Last log lines:',
-                '',
-                '```',
-                log,
-                '```',
+                'The review script did not produce a results file. Check the workflow logs.',
               ].join('\n');
             }
 
-            const { owner, repo } = context.repo;
-            const issue_number = context.payload.pull_request.number;
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number, per_page: 100,
             });

@@ -1,0 +1,82 @@
+version: 1
+
+defaults:
+  reasoning_effort: high
+  max_diff_chars_per_area: 60000
+
+areas:
+  - id: rust
+    label: "Backend (Rust / Tauri)"
+    paths:
+      - "src-tauri/**"
+    rubric: |
+      You are reviewing changes to the Rust/Tauri backend of Prism. Apply these conventions
+      from CLAUDE.md strictly. Treat each as a hard rule unless the diff contains an explicit
+      justification:
+
+      1. The GitHub OAuth token must NEVER cross to the frontend. Token load/save/delete
+         lives only in `src-tauri/src/auth.rs`. Frontend may only learn auth status (boolean),
+         never the token value.
+      2. Errors must use the `AppError` enum from `src-tauri/src/error.rs`. Avoid `.unwrap()`
+         and `.expect()` in `#[tauri::command]` handlers — they panic the host.
+      3. For GitHub features, prefer `Client::graphql<T>` (one query with aliases) over
+         multiple REST calls. New REST usage needs a justification in the diff or commit body.
+      4. Schema changes in `db.rs` must be additive and idempotent (use
+         `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN` guarded by a migration
+         check). Never silently drop columns.
+      5. New crate dependencies in `Cargo.toml` need a clear reason — flag any addition
+         without one.
+
+  - id: frontend
+    label: "Frontend (React / TypeScript)"
+    paths:
+      - "src/**"
+    rubric: |
+      You are reviewing changes to the React/TypeScript frontend of Prism. Apply these
+      conventions from CLAUDE.md strictly:
+
+      1. `src/lib/api.ts` is the single boundary to Rust. Every `invoke()` wrapper here must
+         mirror its Rust counterpart's argument and return types — flag any drift.
+      2. UI uses shadcn/ui primitives in `src/components/ui/` and Tailwind v4 tokens. Avoid
+         hand-rolled CSS that duplicates an existing primitive.
+      3. The app is dark-mode only (`class="dark"` is hardcoded on `<html>`). Light-mode-only
+         styles or branches are dead code — flag them.
+      4. UI state (e.g. sidebar collapsed, expanded orgs) goes to `localStorage` with the
+         `prism.*` prefix. User data (watched repos, tracked orgs) goes to SQLite via Tauri
+         commands. Mixing these layers is a smell.
+      5. New npm dependencies need a clear reason — flag any addition without one.
+
+  - id: ci
+    label: "CI / GitHub Actions"
+    paths:
+      - ".github/**"
+    rubric: |
+      You are reviewing changes to GitHub Actions / CI configuration. Apply these checks:
+
+      1. Secrets are NEVER echoed, logged, or written to artifacts. `set -x`, `echo` of an
+         env var holding a secret, and uploading files containing secrets are all violations.
+      2. Workflows triggered by `pull_request_target` execute with repo write permissions
+         and access secrets — flag any change from `pull_request` to `pull_request_target`
+         unless the diff includes explicit fork-safety review (no checkout of PR head, no
+         execution of PR-supplied code).
+      3. Third-party actions (anything not under `actions/`) should be pinned to a tagged
+         version or a SHA. Pure `@main` references are a supply-chain risk.
+      4. Permissions blocks should follow least-privilege. Flag any `permissions: write-all`
+         or broadening of an existing block without justification.
+
+  - id: docs
+    label: "Documentation"
+    paths:
+      - "docs/**"
+      - "*.md"
+      - "**/*.md"
+    rubric: |
+      You are reviewing documentation changes. Apply these checks:
+
+      1. `docs/PRD.md` is the source of truth for product scope. Changes that alter scope
+         or conventions must also be reflected in `CLAUDE.md` (or vice versa) — flag drift
+         between the two.
+      2. Code, identifiers, and commit messages stay in English. PT-BR is acceptable in
+         user-facing UI copy and in user-conversation transcripts but not in code.
+      3. Avoid stating things the code already says clearly. Documentation should explain
+         the WHY (constraints, motivations, past decisions), not narrate the WHAT.
