@@ -1236,7 +1236,6 @@ pub async fn start_pr_review(pr_node_id: String) -> AppResult<String> {
     let variables = serde_json::json!({
         "input": {
             "pullRequestId": pr_node_id,
-            "event": "PENDING",
         }
     });
     let data: StartReviewData = client.graphql(START_REVIEW_MUTATION, variables).await?;
